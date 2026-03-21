@@ -1,0 +1,377 @@
+#[warn(dead_code)]
+/// use std::fmt;
+/// use std::ops;
+use std::path::{PathBuf, Path};
+use std::ffi::OsStr;
+use std::os::unix::ffi::OsStrExt;
+use std::time::SystemTime;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use crossbeam::deque::{Injector, Steal, Worker};
+use rustix::fs::{
+    openat, statx,
+    AtFlags, OFlags, StatxFlags,
+    FileType, Statx, Dir
+};
+use rustix::io::Errno;
+use std::os::fd::OwnedFd;
+
+
+/// Raw metadata collected per file via statx()
+#[derive(Debug, Clone)]
+pub struct FileRecord {
+    pub path:          PathBuf,
+    pub dir_id:        u64,      // foreign key, resolved before insert
+    pub inode:         u64,
+    pub device:        u64,      // combined with inode for hardlink dedup
+    pub size_bytes:    u64,
+    pub owner_uid:     u32,
+    pub owner_gid:     u32,
+    pub atime:         SystemTime,
+    pub mtime:         SystemTime,
+    pub ctime:         SystemTime,
+    pub hardlink_count: u32,
+    pub is_symlink:    bool,
+}
+
+/// Metadata for a directory entry itself
+#[derive(Debug, Clone)]
+pub struct DirRecord {
+    pub path:       PathBuf,
+    pub parent_id:  Option<u64>,
+    pub inode:      u64,
+    pub device:     u64,
+    pub owner_uid:  u32,
+    pub mtime:      SystemTime,
+}
+
+/// What a worker sends back to the writer thread
+#[derive(Debug)]
+pub struct CrawlBatch {
+    pub dirs:  Vec<DirRecord>,
+    pub files: Vec<FileRecord>,
+}
+
+
+/// three cases for a scan
+/// - we scan everything in the directory
+/// - we check in and nothing appears was modified since last skip, so we skip scan
+/// - we come in and have to refresh certain new files that changed since last time
+#[derive(Debug, Clone)]
+pub enum WorkItem {
+    /// Full scan: stat everything
+    FullScan(PathBuf),
+
+    /// Delta scan: check dir mtime first, skip if unchanged
+    DeltaScan {
+        path:          PathBuf,
+        last_seen_mtime: SystemTime,
+    },
+
+    /// Re-check a specific file (triggered by fsnotify event)
+    FileRefresh(PathBuf),
+}
+
+/// The full result of processing one directory
+#[derive(Debug)]
+pub struct DirResult {
+    pub batch:  CrawlBatch,
+    pub errors: Vec<CrawlError>,
+    pub subdirs: Vec<WorkItem>,  // new work to push back to the queue
+}
+
+
+/// Runtime errors and results
+#[derive(Debug)]
+pub enum CrawlError {
+    PermissionDenied(PathBuf),
+    NotFound(PathBuf),           // disappeared between Dir::read_from and stat
+    IoError(PathBuf, std::io::Error),
+    TooManySymlinks(PathBuf),
+}
+
+fn process_work_item(path: &Path) -> DirResult {
+    let mut batch   = CrawlBatch { dirs: vec![], files: vec![] };
+    let mut errors  = vec![];
+    let mut subdirs = vec![];
+
+    // Open the directory itself with O_RDONLY | O_DIRECTORY
+    // This gives us a file descriptor we can use for statx() calls
+    // avoiding repeated path resolution for every entry
+    let dir_fd: OwnedFd = match openat(
+        rustix::fs::CWD,
+        path,
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
+        rustix::fs::Mode::empty(),
+    ) {
+        Ok(fd)  => fd,
+        Err(e)  => {
+            errors.push(CrawlError::IoError(path.to_owned(), e.into()));
+            return DirResult { batch, errors, subdirs };
+        }
+    };
+
+    // Iterate directory entries via getdents64 under the hood
+    let mut dir_iter = match Dir::read_from(&dir_fd) {
+        Ok(iter) => iter,
+        Err(e)   => {
+            errors.push(CrawlError::IoError(path.to_owned(), e.into()));
+            return DirResult { batch, errors, subdirs };
+        }
+    };
+
+    while let Some(entry) = dir_iter.next() {
+        let entry = match entry {
+            Ok(e)  => e,
+            Err(e) => { errors.push(CrawlError::IoError(path.to_owned(), e.into())); continue; }
+        };
+
+        let name = entry.file_name();
+
+        // Skip . and ..
+        if name.to_bytes() == b"." || name.to_bytes() == b".." {
+            continue;
+        }
+
+        // apparently the trait `AsRef<Path>` is not implemented for `CStr`
+        // and we need a lot of path.join(name) so we need a cast
+        let name_osstr = OsStr::from_bytes(name.to_bytes());
+        let entry_path = path.join(name_osstr);
+
+        // statx() relative to the open dir fd — no full path resolution
+        // This is the key performance win: the kernel doesn't re-walk the
+        // path components for every entry, it resolves relative to the fd
+        let sx: Statx = match statx(
+            &dir_fd,
+            name,
+            AtFlags::NO_AUTOMOUNT | AtFlags::SYMLINK_NOFOLLOW,
+            StatxFlags::SIZE
+                | StatxFlags::INO
+                | StatxFlags::ATIME
+                | StatxFlags::MTIME
+                | StatxFlags::CTIME
+                | StatxFlags::UID
+                | StatxFlags::GID
+                | StatxFlags::NLINK
+                | StatxFlags::TYPE,
+        ) {
+            Ok(s)  => s,
+            Err(Errno::NOENT) => {
+                // File disappeared between Dir::read_from and statx — normal at scale
+                errors.push(CrawlError::NotFound(entry_path));
+                continue;
+            }
+            Err(e) => {
+                errors.push(CrawlError::IoError(entry_path, e.into()));
+                continue;
+            }
+        };
+
+        //let entry_path = path.join(name);
+        let file_type  = FileType::from_raw_mode(sx.stx_mode as _);
+
+        match file_type {
+            FileType::Directory => {
+                subdirs.push(WorkItem::FullScan(entry_path.clone()));
+                batch.dirs.push(DirRecord {
+                    path:      entry_path,
+                    parent_id: None,   // resolved by writer against DB
+                    inode:     sx.stx_ino,
+                    device:    device_id(&sx),
+                    owner_uid: sx.stx_uid,
+                    mtime:     statx_time_to_system_time(&sx.stx_mtime),
+                });
+            }
+            FileType::RegularFile => {
+                batch.files.push(FileRecord {
+                    path:           entry_path,
+                    dir_id:         0,    // resolved by writer
+                    inode:          sx.stx_ino,
+                    device:         device_id(&sx),
+                    size_bytes:     sx.stx_size,
+                    owner_uid:      sx.stx_uid,
+                    owner_gid:      sx.stx_gid,
+                    atime:          statx_time_to_system_time(&sx.stx_atime),
+                    mtime:          statx_time_to_system_time(&sx.stx_mtime),
+                    ctime:          statx_time_to_system_time(&sx.stx_ctime),
+                    hardlink_count: sx.stx_nlink,
+                    is_symlink:     false,
+                });
+            }
+            FileType::Symlink => {
+                // Record symlinks but don't follow — avoids cycles
+                // You may want a SymlinkRecord variant later
+            }
+            _ => {} // devices, sockets, pipes — ignore or handle separately
+        }
+    }
+
+    DirResult { batch, errors, subdirs }
+}
+
+fn device_id(sx: &Statx) -> u64 {
+    // Combine major/minor into a single u64 for the (device, inode) dedup key
+    ((sx.stx_dev_major as u64) << 32) | (sx.stx_dev_minor as u64)
+}
+
+fn statx_time_to_system_time(t: &rustix::fs::StatxTimestamp) -> std::time::SystemTime {
+    std::time::UNIX_EPOCH
+        + std::time::Duration::new(t.tv_sec as u64, t.tv_nsec)
+}
+
+
+/// thread dispatch
+
+pub fn worker_thread(
+    local:       Worker<WorkItem>,
+    global:      Arc<Injector<WorkItem>>,
+    stealers:    Arc<Vec<crossbeam::deque::Stealer<WorkItem>>>,
+    result_tx:   std::sync::mpsc::SyncSender<DirResult>,
+    active_count: Arc<AtomicUsize>,
+) {
+    loop {
+        let item = find_work(&local, &global, &stealers);
+
+        match item {
+            Some(work) => {
+                active_count.fetch_add(1, Ordering::SeqCst);
+
+                let path = match &work {
+                    WorkItem::FullScan(path)         => path.as_path(),
+                    WorkItem::DeltaScan { path, .. } => path.as_path(),
+                    WorkItem::FileRefresh(path)      => path.as_path(),
+                };
+
+                let result = process_work_item(path);
+
+                // push discovered subdirectories back into the queue
+                for subdir in result.subdirs.iter() {
+                    global.push(subdir.clone());
+                }
+
+                // ship the data batch to the writer
+                result_tx.send(result).expect("writer thread died");
+
+                active_count.fetch_sub(1, Ordering::SeqCst);
+            }
+            None => {
+                // No work found — check if we're truly done
+                if active_count.load(Ordering::SeqCst) == 0
+                    && global.is_empty()
+                {
+                    break;
+                }
+                // Otherwise another worker is mid-flight and may push more dirs
+                std::thread::sleep(std::time::Duration::from_micros(100));
+            }
+        }
+    }
+}
+
+fn find_work(
+    local:    &Worker<WorkItem>,
+    global:   &Injector<WorkItem>,
+    stealers: &[crossbeam::deque::Stealer<WorkItem>],
+) -> Option<WorkItem> {
+    // own queue first
+    local.pop()
+        // then global injector
+        .or_else(|| loop {
+            match global.steal_batch_and_pop(local) {
+                Steal::Success(item) => break Some(item),
+                Steal::Retry        => continue,
+                Steal::Empty        => break None,
+            }
+        })
+        // then steal from siblings
+        .or_else(|| {
+            stealers.iter()
+                .map(|s| s.steal())
+                .find_map(|s| s.success())
+        })
+}
+
+
+
+fn main() {
+    let root = std::env::args()
+        .nth(1)
+        .expect("Usage: fs_crawler <path>");
+
+    let num_workers = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4);
+
+    // --- shared state ---
+    let global: Arc<Injector<WorkItem>> = Arc::new(Injector::new());
+    let active_count: Arc<AtomicUsize> = Arc::new(AtomicUsize::new(0));
+
+    // --- build per-worker deques and collect stealers ---
+    let mut workers = Vec::new();
+    let mut stealers = Vec::new();
+
+    for _ in 0..num_workers {
+        let w = Worker::<WorkItem>::new_fifo();
+        stealers.push(w.stealer());
+        workers.push(w);
+    }
+
+    let stealers: Arc<Vec<_>> = Arc::new(stealers);
+
+    // --- mpsc channel between workers and writer ---
+    let (result_tx, result_rx) = std::sync::mpsc::sync_channel::<DirResult>(256);
+
+    // --- seed the global queue with the root path ---
+    global.push(WorkItem::FullScan(PathBuf::from(root)));
+
+    // --- spawn writer thread ---
+    let writer_handle = std::thread::spawn(move || {
+        let mut total_files = 0u64;
+        let mut total_bytes = 0u64;
+        let mut total_errors = 0u64;
+
+        while let Ok(result) = result_rx.recv() {
+            total_files += result.batch.files.len() as u64;
+            total_bytes += result.batch.files.iter().map(|f| f.size_bytes).sum::<u64>();
+            total_errors += result.errors.len() as u64;
+
+            // TODO: replace with bulk COPY to postgres
+            for f in &result.batch.files {
+                println!("[FILE] {:?} size={} uid={}", f.path, f.size_bytes, f.owner_uid);
+            }
+            for e in &result.errors {
+                eprintln!("[ERROR] {:?}", e);
+            }
+        }
+
+        println!("--- done ---");
+        println!("files:  {}", total_files);
+        println!("bytes:  {}", total_bytes);
+        println!("errors: {}", total_errors);
+    });
+
+    // --- spawn worker threads ---
+    let worker_handles: Vec<_> = workers
+        .into_iter()
+        .map(|local| {
+            let global      = Arc::clone(&global);
+            let stealers    = Arc::clone(&stealers);
+            let result_tx   = result_tx.clone();
+            let active_count = Arc::clone(&active_count);
+
+            std::thread::spawn(move || {
+                worker_thread(local, global, stealers, result_tx, active_count);
+            })
+        })
+        .collect();
+
+    // --- wait for all workers to finish ---
+    for handle in worker_handles {
+        handle.join().expect("worker thread panicked");
+    }
+
+    // --- drop the last result_tx so the writer's recv() loop exits ---
+    drop(result_tx);
+
+    writer_handle.join().expect("writer thread panicked");
+}
