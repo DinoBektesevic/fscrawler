@@ -8,7 +8,7 @@ pub enum OutputMode {
 }
 
 #[derive(Parser)]
-#[command(name = "fs_crawler", about = "Filesystem metadata crawler")]
+#[command(name = "fscrawler", about = "Filesystem metadata crawler")]
 pub struct Cli {
     /// Root path to crawl
     pub root: String,

@@ -3,7 +3,7 @@ use sqlx::postgres::PgPoolOptions;
 use crate::writers::WriterError;
 
 
-/// The database expects the fs_crawler_manager_role to
+/// The database expects the crawler_manager_role to
 /// exists. Briefly, configure the database as follows:
 ///
 /// -- ironically roles are users in PSQL, but default to NOLOGIN whereas
@@ -62,17 +62,17 @@ use crate::writers::WriterError;
 /// ALTER DEFAULT PRIVILEGES IN SCHEMA crawler
 ///     GRANT USAGE, SELECT ON SEQUENCES TO crawler_manager;
 ///
-/// These are provided as SQL executable scripts in the fs_crawler/sql directory.
+/// These are provided as SQL executable scripts in the fscrawler/sql directory.
 /// Run them in order as a user with sufficient privileges using a client.
 /// For example for PSQL:
 ///
-/// psql postgresql_url -f fs_crawler/sql/01_roles_database.sql
-/// psql postgresql_url_as_crawler_admin -f fs_crawler/sql/02_schema_permissions.sql
+/// psql postgresql_url -f fscrawler/sql/01_roles_database.sql
+/// psql postgresql_url_as_crawler_admin -f fscrawler/sql/02_schema_permissions.sql
 ///
 /// or if already inside an interactive PSQL session
 ///
-/// \i fs_crawler/sql/01_roles_database.sql
-/// \i fs_crawler/sql/02_schema_permissions.sql
+/// \i fscrawler/sql/01_roles_database.sql
+/// \i fscrawler/sql/02_schema_permissions.sql
 ///
 
 /// Opens a connection pool to the PostgreSQL database at `database_url`.

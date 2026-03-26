@@ -5,14 +5,14 @@ use std::sync::atomic::AtomicUsize;
 use crossbeam::deque::{Injector, Worker};
 
 use clap::Parser;
-use fs_crawler::cli::{Cli, OutputMode};
-use fs_crawler::types::{WorkItem, next_dir_id};
-use fs_crawler::worker::worker_thread;
+use fscrawler::cli::{Cli, OutputMode};
+use fscrawler::types::{WorkItem, next_dir_id};
+use fscrawler::worker::worker_thread;
 
-use fs_crawler::writers::{streaming_writer_thread, buffering_writer_thread};
-use fs_crawler::writers::stdout::StdoutWriter;
-use fs_crawler::writers::postgres::PostgresWriter;
-use fs_crawler::writers::table::{TableWriter, SortOrder, SizeUnit};
+use fscrawler::writers::{streaming_writer_thread, buffering_writer_thread};
+use fscrawler::writers::stdout::StdoutWriter;
+use fscrawler::writers::postgres::PostgresWriter;
+use fscrawler::writers::table::{TableWriter, SortOrder, SizeUnit};
 
 
 fn main() {
@@ -36,7 +36,7 @@ fn main() {
 
     // if --create-tables is the only goal, run it and exit early
     if cli.create_tables {
-        match fs_crawler::db::run_create(&cli.database_url.unwrap()) {
+        match fscrawler::db::run_create(&cli.database_url.unwrap()) {
             Ok(_)  => println!("Database tables created successfully."),
             Err(e) => {
                 eprintln!("Failed to create tables: {}", e);
@@ -48,7 +48,7 @@ fn main() {
 
     // if --clear is the only goal, truncate all tables, re-initialise schema and exit early
     if cli.clear {
-        match fs_crawler::db::run_clear(&cli.database_url.unwrap()) {
+        match fscrawler::db::run_clear(&cli.database_url.unwrap()) {
             Ok(_)  => println!("Tables cleared and re-initialised."),
             Err(e) => {
                 eprintln!("Failed to clear tables: {}", e);
@@ -156,12 +156,12 @@ fn main() {
     // to gain the COPY throughput benefits of constraint-free bulk inserts
     if let OutputMode::Postgres = cli.output {
         let url = cli.database_url.as_ref().unwrap();
-        match fs_crawler::db::run_post_crawl(&url) {
+        match fscrawler::db::run_post_crawl(&url) {
             Ok(_) => println!("Post-crawl successful!"),
             Err(e) => eprintln!("Post-crawl failure: {}", e),
         }
 
-        match fs_crawler::db::run_finish(&url) {
+        match fscrawler::db::run_finish(&url) {
             Ok(_) => println!("Closure and summary tables created!"),
             Err(e) => eprintln!("Failed to create closure and summary tables: {}", e),
         }
