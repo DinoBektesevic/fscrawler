@@ -6,6 +6,38 @@ use crossbeam::deque::{Injector, Steal, Stealer, Worker};
 use crate::crawler::process_work_item;
 use crate::types::{DirResult, WorkItem};
 
+
+/// ┌─────────────────────────────────────────────────────────────┐
+/// │                     Main Thread                             │
+/// │  Seeds queue with root path(s)                              │
+/// │  Spawns N worker threads                                    │
+/// │  Waits on result_rx channel                                 │
+/// └──────────────────────────┬──────────────────────────────────┘
+///                            │  initial work items
+///                            ▼
+/// ┌─────────────────────────────────────────────────────────────┐
+/// │              crossbeam::deque::Injector<PathBuf>            │
+/// │                   (global work queue)                       │
+/// └──────┬───────────────────┬──────────────────────┬───────────┘
+///        │ steal             │ steal                │ steal
+///        ▼                   ▼                      ▼
+/// ┌────────────┐      ┌────────────┐        ┌────────────┐
+/// │  Worker 1  │      │  Worker 2  │        │  Worker N  │
+/// │  local     │◄────►│  local     │◄──────►│  local     │
+/// │  deque     │steal │  deque     │steal   │  deque     │
+/// └─────┬──────┘      └─────┬──────┘        └─────┬──────┘
+///       │                   │                     │
+///       │  pushes new dirs back to injector       │
+///       │  sends file batches to writer           │
+///       └───────────────────┼─────────────────────┘
+///                           │  CrawlBatch via mpsc channel
+///                           ▼
+///                ┌─────────────────────┐
+///                │    Writer Thread    │
+///                │  accumulates rows   │
+///                │  bulk COPY to DB    │
+///                └─────────────────────┘
+
 pub fn worker_thread(
     local:        Worker<WorkItem>,
     global:       Arc<Injector<WorkItem>>,
@@ -18,13 +50,16 @@ pub fn worker_thread(
             Some(work) => {
                 active_count.fetch_add(1, Ordering::SeqCst);
 
-                let path = match &work {
-                    WorkItem::FullScan(p)            => p.as_path(),
-                    WorkItem::DeltaScan { path, .. } => path.as_path(),
-                    WorkItem::FileRefresh(p)         => p.as_path(),
+                let (path, dir_id, parent_id) = match &work {
+                    WorkItem::FullScan    { path, dir_id, parent_id }     => (path.as_path(), *dir_id, *parent_id),
+                    WorkItem::DeltaScan   { path, dir_id, parent_id, .. } => (path.as_path(), *dir_id, *parent_id),
+                    // WorkItem::FileRefresh { path, dir_id }     => (path.as_path(), *dir_id),
+                    WorkItem::FileRefresh { .. } => {
+                        unimplemented!("FileRefresh requires inotify code that doesn't exist yet.");
+                    }
                 };
 
-                let result = process_work_item(path);
+                let result = process_work_item(path, dir_id, parent_id);
 
                 for subdir in result.subdirs.iter() {
                     global.push(subdir.clone());

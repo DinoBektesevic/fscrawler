@@ -27,9 +27,15 @@ impl SizeUnit {
 
 pub struct TableWriter {
     files:      Vec<FileRecord>,
-    errors:     u64,
+
+    // processing summary statistics
+    total_errors: u64,
+
+    // printing configurables
     sort_order: SortOrder,
     size_unit:  SizeUnit,
+
+    // a compile-time printing table formatting options
     col_path:   usize,
     col_size:   usize,
     col_uid:    usize,
@@ -39,7 +45,7 @@ impl TableWriter {
     pub fn new(sort_order: SortOrder, size_unit: SizeUnit) -> Self {
         Self {
             files: Vec::new(),
-            errors: 0,
+            total_errors: 0,
             sort_order,
             size_unit,
             col_path: 60,
@@ -71,7 +77,7 @@ impl TableWriter {
 
 impl BufferingWriter for TableWriter {
     fn accumulate(&mut self, result: DirResult) {
-        self.errors += result.errors.len() as u64;
+        self.total_errors += result.errors.len() as u64;
         self.files.extend(result.batch.files);
     }
 
@@ -91,7 +97,9 @@ impl BufferingWriter for TableWriter {
         }
 
         println!("{}", "-".repeat(self.col_path + self.col_size + self.col_uid + 2));
-        println!("total files: {}  errors: {}", self.files.len(), self.errors);
+        println!("files:  {}", self.files.len());
+        println!("bytes:  {}", self.files.iter().map(|f| f.size_bytes).sum::<u64>());
+        println!("errors: {}", self.total_errors);
         Ok(())
     }
 }

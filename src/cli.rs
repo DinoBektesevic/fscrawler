@@ -17,7 +17,15 @@ pub struct Cli {
     #[arg(long, value_enum, default_value = "stdout")]
     pub output: OutputMode,
 
-    /// Postgres connection URL (required when --output=postgres)
+    /// Executes the table creation statements
+    #[arg(long)]
+    pub create_tables: bool,
+
+    /// Clears all crawler tables and re-initialises the schema (requires --database-url)
+    #[arg(long)]
+    pub clear: bool,
+
+    /// Postgres connection URL (required when --output=postgres and/or create-tables)
     #[arg(long)]
     pub database_url: Option<String>,
 

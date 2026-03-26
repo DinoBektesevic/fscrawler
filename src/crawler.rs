@@ -3,18 +3,41 @@ use std::os::fd::OwnedFd;
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
-use rustix::fs::{openat, statx, AtFlags, Dir, FileType, OFlags, Statx, StatxFlags};
+use rustix::fs::{
+    openat,
+    statx,
+    AtFlags,
+    Dir,
+    FileType,
+    OFlags,
+    Statx,
+    StatxFlags
+};
 use rustix::io::Errno;
 
 use crate::types::{
-    CrawlBatch, CrawlError, DirRecord, DirResult, FileRecord, WorkItem,
+    CrawlBatch,
+    CrawlError,
+    DirRecord,
+    DirResult,
+    FileRecord,
+    WorkItem,
+    next_file_id,
+    next_dir_id
 };
 
-pub fn process_work_item(path: &Path) -> DirResult {
+
+// The rest is just getting the items in the given path
+// figure out if it's a directory, link or a file
+// query the files for the data and punt the directories back
+// to the worklist
+pub fn process_work_item(path: &Path, current_dirid: u64, parent_dirid: Option<u64>) -> DirResult {
     let mut batch   = CrawlBatch { dirs: vec![], files: vec![] };
     let mut errors  = vec![];
     let mut subdirs = vec![];
 
+    // open the dir pointed to by the path. This is a syscall and it costs when
+    // we start hitting millions or 10's of millions inodes.
     let dir_fd: OwnedFd = match openat(
         rustix::fs::CWD,
         path,
@@ -28,6 +51,35 @@ pub fn process_work_item(path: &Path) -> DirResult {
         }
     };
 
+    // Then we will add this directory's information to the processed batch
+    // pile. This is not a syscall cause the dir is already opened, the cost
+    // is low.
+    let self_sx = match statx(
+        &dir_fd,
+        rustix::cstr!("."),
+        AtFlags::NO_AUTOMOUNT,
+        StatxFlags::INO | StatxFlags::UID | StatxFlags::MTIME,
+    ){
+        Ok(s) => s,
+        Err(e) => { // We don't want to stop exec if we hit an error
+            errors.push(CrawlError::IoError(path.to_owned(), e.into()));
+            return DirResult { batch, errors, subdirs };
+        }
+    };
+
+    batch.dirs.push(DirRecord {
+        dir_id:    current_dirid,
+        path:      path.to_owned(),
+        parent_id: parent_dirid,
+        inode:     self_sx.stx_ino,
+        device:    device_id(&self_sx),
+        owner_uid: self_sx.stx_uid,
+        mtime:     statx_time_to_system_time(&self_sx.stx_mtime),
+    });
+
+    // Then scan the directory items. Grab any subdirectories and push them back
+    // onto the work pile (subdirs) and take any files and push their info onto
+    // the processed (batch) pile. Symlinks get ignored.
     let mut dir_iter = match Dir::read_from(&dir_fd) {
         Ok(iter) => iter,
         Err(e)   => {
@@ -74,20 +126,21 @@ pub fn process_work_item(path: &Path) -> DirResult {
 
         match file_type {
             FileType::Directory => {
-                subdirs.push(WorkItem::FullScan(entry_path.clone()));
-                batch.dirs.push(DirRecord {
-                    path:      entry_path,
-                    parent_id: None,
-                    inode:     sx.stx_ino,
-                    device:    device_id(&sx),
-                    owner_uid: sx.stx_uid,
-                    mtime:     statx_time_to_system_time(&sx.stx_mtime),
+                // So we ran into a subdirectory. Push its path back onto the
+                // work queue, but figure out its dir ID **HERE**. This way we
+                // can track the dir_id for files and subdirs.
+                let new_dirid = next_dir_id();
+                subdirs.push(WorkItem::FullScan{
+                    path:   entry_path.clone(),
+                    dir_id: new_dirid,
+                    parent_id: Some(current_dirid)
                 });
             }
             FileType::RegularFile => {
                 batch.files.push(FileRecord {
+                    file_id:        next_file_id(),
                     path:           entry_path,
-                    dir_id:         0,
+                    dir_id:         current_dirid,
                     inode:          sx.stx_ino,
                     device:         device_id(&sx),
                     size_bytes:     sx.stx_size,

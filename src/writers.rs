@@ -49,15 +49,38 @@ pub trait BufferingWriter: Send + 'static {
 
 // --- thread runners ---
 
+//pub fn streaming_writer_thread<W: StreamingWriter>(
+//    result_rx: std::sync::mpsc::Receiver<DirResult>,
+//    mut writer: W,
+//) -> Result<(), WriterError> {
+//    while let Ok(result) = result_rx.recv() {
+//        writer.write_batch(result)?;
+//    }
+//    writer.finish()
+//}
 pub fn streaming_writer_thread<W: StreamingWriter>(
     result_rx: std::sync::mpsc::Receiver<DirResult>,
     mut writer: W,
 ) -> Result<(), WriterError> {
+    let mut write_error: Option<WriterError> = None;
+
     while let Ok(result) = result_rx.recv() {
-        writer.write_batch(result)?;
+        if write_error.is_none() {
+            if let Err(e) = writer.write_batch(result) {
+                eprintln!("[writer] error during write_batch: {}", e);
+                write_error = Some(e);
+                // don't return — keep draining so workers don't panic
+            }
+        }
+        // if we already have an error, just drain and discard
     }
-    writer.finish()
+
+    match write_error {
+        Some(e) => Err(e),
+        None    => writer.finish(),
+    }
 }
+
 
 pub fn buffering_writer_thread<W: BufferingWriter>(
     result_rx: std::sync::mpsc::Receiver<DirResult>,
@@ -67,4 +90,5 @@ pub fn buffering_writer_thread<W: BufferingWriter>(
         writer.accumulate(result);
     }
     writer.render()
+
 }

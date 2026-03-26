@@ -3,3 +3,4 @@ pub mod types;
 pub mod crawler;
 pub mod worker;
 pub mod writers;
+pub mod db;
