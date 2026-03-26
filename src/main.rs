@@ -34,7 +34,7 @@ fn main() {
         std::process::exit(1);
     }
 
-    // if we're just creating tables, we can
+    // if --create-tables is the only goal, run it and exit early
     if cli.create_tables {
         match fs_crawler::db::run_create(&cli.database_url.unwrap()) {
             Ok(_)  => println!("Database tables created successfully."),
@@ -46,6 +46,7 @@ fn main() {
         std::process::exit(0);
     }
 
+    // if --clear is the only goal, truncate all tables, re-initialise schema and exit early
     if cli.clear {
         match fs_crawler::db::run_clear(&cli.database_url.unwrap()) {
             Ok(_)  => println!("Tables cleared and re-initialised."),
@@ -151,8 +152,8 @@ fn main() {
     };
 
     // after writer finishes, reconnect for post-crawl
-    // In this step we add the primary key constraints removed
-    // earlier to gain the sql COPY speedups with no checks
+    // In this step we add the foreign key constraints omitted during ingestion
+    // to gain the COPY throughput benefits of constraint-free bulk inserts
     if let OutputMode::Postgres = cli.output {
         let url = cli.database_url.as_ref().unwrap();
         match fs_crawler::db::run_post_crawl(&url) {

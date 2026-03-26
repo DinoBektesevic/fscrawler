@@ -31,6 +31,18 @@ use crate::types::{
 // figure out if it's a directory, link or a file
 // query the files for the data and punt the directories back
 // to the worklist
+
+/// Opens the directory at `path` and scans its contents.
+///
+/// Calls `statx(2)` on the directory itself to collect its metadata (inode, owner,
+/// mtime) and appends a [`DirRecord`] to the batch, which will be written to the
+/// `directories` table.
+///
+/// Scans the directory entries and:
+/// - Collects metadata for each regular file into [`CrawlBatch`] (the good stuff)
+/// - Creates a new [`WorkItem`] for each subdirectory to be scanned later (the to-do stuff)
+/// - Silences per-entry errors into [`DirResult`] so one bad entry doesn't stop the crawl (the bad stuff)
+/// - Skips symlinks and special files entirely
 pub fn process_work_item(path: &Path, current_dirid: u64, parent_dirid: Option<u64>) -> DirResult {
     let mut batch   = CrawlBatch { dirs: vec![], files: vec![] };
     let mut errors  = vec![];
@@ -52,8 +64,8 @@ pub fn process_work_item(path: &Path, current_dirid: u64, parent_dirid: Option<u
     };
 
     // Then we will add this directory's information to the processed batch
-    // pile. This is not a syscall cause the dir is already opened, the cost
-    // is low.
+    // pile. statx(2) is a syscall, but the dir fd is already open so there
+    // is no path traversal cost — just the metadata lookup.
     let self_sx = match statx(
         &dir_fd,
         rustix::cstr!("."),
@@ -161,10 +173,14 @@ pub fn process_work_item(path: &Path, current_dirid: u64, parent_dirid: Option<u
     DirResult { batch, errors, subdirs }
 }
 
+/// Combines the major and minor device numbers from a `statx` result into a
+/// single `u64` for storage. Major is packed into the upper 32 bits.
 pub fn device_id(sx: &Statx) -> u64 {
     ((sx.stx_dev_major as u64) << 32) | (sx.stx_dev_minor as u64)
 }
 
+/// Converts a `statx` timestamp (seconds + nanoseconds since the Unix epoch)
+/// into a [`std::time::SystemTime`].
 pub fn statx_time_to_system_time(t: &rustix::fs::StatxTimestamp) -> std::time::SystemTime {
     std::time::UNIX_EPOCH + std::time::Duration::new(t.tv_sec as u64, t.tv_nsec)
 }

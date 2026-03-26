@@ -5,81 +5,15 @@ use std::time::SystemTime;
 use crate::types::{DirResult, FileRecord, DirRecord};
 use crate::writers::{StreamingWriter, WriterError};
 
-/// A lot of DBMS is required to set up appropriate tables
-/// to work with the current ingestion patterns
-/// Annoying, but unlike SQL it can't seemingly be emitted by a low-level sqlx
-/// interface?
-///
-/// CREATE TABLE users (
-///     user_id     BIGINT PRIMARY KEY,
-///     username    TEXT NOT NULL,
-///     uid         INT UNIQUE NOT NULL   -- OS-level UID
-/// );
-///
-/// CREATE TABLE directories (
-///     dir_id      BIGINT PRIMARY KEY,
-///     path        TEXT NOT NULL,        -- full path, for human readability
-///     parent_id   BIGINT REFERENCES directories(dir_id),
-///     owner_uid   INT REFERENCES users(uid),
-///     mtime       TIMESTAMPTZ,
-///     last_seen   TIMESTAMPTZ NOT NULL  -- when crawler last visited
-/// );
-///
-/// CREATE TABLE directory_closure (
-///     ancestor_id   BIGINT REFERENCES directories(dir_id),
-///     descendant_id BIGINT REFERENCES directories(dir_id),
-///     depth         INT NOT NULL,
-///     PRIMARY KEY (ancestor_id, descendant_id)
-/// );
-///
-/// CREATE TABLE files (
-///     file_id       BIGINT PRIMARY KEY,
-///     dir_id        BIGINT REFERENCES directories(dir_id),
-///     filename      TEXT NOT NULL,
-///     size_bytes    BIGINT NOT NULL,
-///     owner_uid     INT REFERENCES users(uid),
-///     atime         TIMESTAMPTZ,
-///     mtime         TIMESTAMPTZ,
-///     ctime         TIMESTAMPTZ,
-///     inode         BIGINT,
-///     hardlink_count INT,
-///     last_seen     TIMESTAMPTZ NOT NULL
-/// );
-///
-/// // Closure tables
-/// -- Cumulative size under any directory
-///     SELECT SUM(f.size_bytes)
-///     FROM directory_closure dc
-///     JOIN files f ON f.dir_id = dc.descendant_id
-/// WHERE dc.ancestor_id = :target_dir_id;
-///
-/// -- Per-user total disk usage
-///     SELECT u.username, SUM(f.size_bytes) as total_bytes
-///     FROM files f
-///     JOIN users u ON u.uid = f.owner_uid
-///     GROUP BY u.username
-///     ORDER BY total_bytes DESC;
-///
-/// -- Directory tree breakdown per user
-///     SELECT d.path, u.username, SUM(f.size_bytes) as subtree_bytes
-///     FROM directory_closure dc
-///     JOIN directories d ON d.dir_id = dc.ancestor_id
-///     JOIN files f ON f.dir_id = dc.descendant_id
-///     JOIN users u ON u.uid = f.owner_uid
-///     GROUP BY d.path, u.username;
-///
-/// CREATE TABLE directory_stats (
-///     dir_id           BIGINT PRIMARY KEY REFERENCES directories(dir_id),
-///     direct_bytes     BIGINT,   -- files directly in this dir
-///         subtree_bytes    BIGINT,   -- cumulative including all descendants
-///         file_count       BIGINT,
-///     subtree_count    BIGINT,
-///     last_computed    TIMESTAMPTZ
-/// );
-
 const PG_COPY_SIGNATURE: &[u8] = b"PGCOPY\n\xff\r\n\0";
 const PG_EPOCH_OFFSET_MICROS: i64 = 946_684_800 * 1_000_000;
 
+/// Writes the PostgreSQL binary COPY file header.
+///
+/// The header layout is:
+/// - **Signature**: 11-byte magic string (`PGCOPY\n\xff\r\n\0`) identifying the binary format
+/// - **Flags**: 4-byte integer field (0 = no OIDs included)
+/// - **Header extension area**: 4-byte length field (0 = no extension data)
 fn pg_binary_header() -> BytesMut {
     let mut buf = BytesMut::new();
     buf.put_slice(PG_COPY_SIGNATURE);
@@ -88,29 +22,38 @@ fn pg_binary_header() -> BytesMut {
     buf
 }
 
+/// Appends the binary COPY file trailer: a 2-byte field count of `-1` signalling end of data.
 fn pg_binary_trailer(buf: &mut BytesMut) {
     buf.put_i16(-1);
 }
 
+/// Appends a variable-length byte field: 4-byte length prefix followed by the data.
 fn put_field_bytes(buf: &mut BytesMut, data: &[u8]) {
     buf.put_i32(data.len() as i32);
     buf.put_slice(data);
 }
 
+/// Appends a 4-byte integer field: 4-byte length prefix followed by the value.
 fn put_field_i32(buf: &mut BytesMut, val: i32) {
     buf.put_i32(4);
     buf.put_i32(val);
 }
 
+/// Appends an 8-byte integer field: 4-byte length prefix followed by the value.
 fn put_field_i64(buf: &mut BytesMut, val: i64) {
     buf.put_i32(8);
     buf.put_i64(val);
 }
 
+/// Appends a NULL field: a 4-byte length of `-1` with no following data.
 fn put_field_null(buf: &mut BytesMut) {
     buf.put_i32(-1);
 }
 
+/// Converts a [`SystemTime`] to a PostgreSQL timestamp.
+///
+/// PostgreSQL timestamps are microseconds since the PostgreSQL epoch (2000-01-01).
+/// This offset conversion is required by the binary COPY format.
 fn system_time_to_pg_timestamp(t: SystemTime) -> i64 {
     let unix_micros = t
         .duration_since(std::time::UNIX_EPOCH)
@@ -119,10 +62,16 @@ fn system_time_to_pg_timestamp(t: SystemTime) -> i64 {
     unix_micros - PG_EPOCH_OFFSET_MICROS
 }
 
+/// Returns the current time as a PostgreSQL timestamp.
 fn now_pg_timestamp() -> i64 {
     system_time_to_pg_timestamp(SystemTime::now())
 }
 
+/// Serialises a slice of [`FileRecord`]s into a PostgreSQL binary COPY buffer.
+///
+/// Each row encodes 11 fields in the order expected by the `files` table COPY statement.
+/// The buffer includes the binary COPY header and trailer. Buffer capacity is pre-allocated
+/// based on an estimated average row size to minimise reallocations.
 // files schema:
 // file_id, dir_id, filename, size_bytes, owner_uid,
 // atime, mtime, ctime, inode, hardlink_count, last_seen
@@ -170,6 +119,11 @@ fn build_file_copy_buffer(files: &[FileRecord]) -> BytesMut {
     buf
 }
 
+/// Serialises a slice of [`DirRecord`]s into a PostgreSQL binary COPY buffer.
+///
+/// Each row encodes 6 fields in the order expected by the `directories` table COPY statement.
+/// The buffer includes the binary COPY header and trailer. Buffer capacity is pre-allocated
+/// based on an estimated average row size to minimise reallocations.
 // directories schema:
 // dir_id, path, parent_id, owner_uid, mtime, last_seen
 // = 6 fields
@@ -204,6 +158,15 @@ fn build_dir_copy_buffer(dirs: &[DirRecord]) -> BytesMut {
     buf
 }
 
+/// Writes crawl results into a PostgreSQL database.
+///
+/// Uses the binary COPY protocol for high-throughput bulk inserts. Records are buffered
+/// internally and flushed in configurable batches (default: 10,000 records) to amortise
+/// the cost of each COPY call. The connection pool is intentionally kept small — COPY
+/// uses one connection at a time, so additional connections would not improve throughput.
+///
+/// Implements [`StreamingWriter`], processing results as they arrive from worker threads.
+/// Directories are always flushed before files to satisfy foreign key ordering.
 pub struct PostgresWriter {
     file_buffer: Vec<FileRecord>,
     dir_buffer:  Vec<DirRecord>,
@@ -213,6 +176,10 @@ pub struct PostgresWriter {
 }
 
 impl PostgresWriter {
+    /// Creates a new `PostgresWriter` connected to `database_url`.
+    ///
+    /// Builds a connection pool and sets the search path to the `crawler` schema.
+    /// Exits the process if the connection cannot be established.
     pub fn new(database_url: String) -> Self {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -243,6 +210,10 @@ impl PostgresWriter {
         }
     }
 
+    /// Flushes buffered [`FileRecord`]s and [`DirRecord`]s to the database.
+    ///
+    /// Directories are written before files to satisfy the foreign key ordering.
+    /// Buffers are cleared after a successful flush.
     fn flush(&mut self) -> Result<(), WriterError> {
         if self.file_buffer.is_empty() && self.dir_buffer.is_empty() {
             return Ok(());
@@ -264,6 +235,7 @@ impl PostgresWriter {
         result
     }
 
+    /// Bulk-inserts a slice of [`FileRecord`]s via binary COPY.
     async fn copy_files(pool: &sqlx::PgPool, files: &[FileRecord]) -> Result<(), WriterError> {
         let mut copy = pool
             .copy_in_raw(
@@ -279,6 +251,7 @@ impl PostgresWriter {
         Ok(())
     }
 
+    /// Bulk-inserts a slice of [`DirRecord`]s via binary COPY.
     async fn copy_dirs(pool: &sqlx::PgPool, dirs: &[DirRecord]) -> Result<(), WriterError> {
         let mut copy = pool
             .copy_in_raw(

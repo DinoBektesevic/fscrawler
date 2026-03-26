@@ -1,6 +1,10 @@
 use crate::types::DirResult;
 use crate::writers::{StreamingWriter, WriterError};
 
+/// Writes crawl results to stdout.
+///
+/// Implements [`StreamingWriter`], printing each file's path, size, and owner uid
+/// as it arrives. Prints a summary of total files, bytes, and errors on finish.
 pub struct StdoutWriter {
     total_files:  u64,
     total_bytes:  u64,

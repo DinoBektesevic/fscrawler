@@ -10,16 +10,25 @@ use std::sync::atomic::{AtomicU64, Ordering};
 static FILE_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
 static DIR_ID_COUNTER:  AtomicU64 = AtomicU64::new(1);
 
+/// Global shared atomic file ID counter. Determines the primary, and subsequently foreign,
+/// keys before inserting into DB. IDs will reset to 1 if crawler is executed again,
+/// which will lead to conflicts. Fix is pending.
 pub fn next_file_id() -> u64 {
     FILE_ID_COUNTER.fetch_add(1, Ordering::Relaxed)
 }
 
+/// Global shared atomic directory ID counter. Determines the primary, and subsequently foreign,
+/// keys before inserting into DB. IDs will reset to 1 if crawler is executed again,
+/// which will lead to conflicts. Fix is pending.
 pub fn next_dir_id() -> u64 {
     DIR_ID_COUNTER.fetch_add(1, Ordering::Relaxed)
 }
 
 
 // core data structs
+
+/// Metadata record for a single regular file, populated by `statx(2)`.
+/// Stored in [`CrawlBatch`] and written to the `files` table.
 #[derive(Debug, Clone)]
 pub struct FileRecord {
     pub file_id:        u64,
@@ -37,45 +46,54 @@ pub struct FileRecord {
     pub is_symlink:     bool,
 }
 
+/// Metadata record for a single directory, populated by `statx(2)`.
+/// Stored in [`CrawlBatch`] and written to the `directories` table.
 #[derive(Debug, Clone)]
 pub struct DirRecord {
-    pub dir_id:        u64,
-    pub path:       PathBuf,
-    pub parent_id:  Option<u64>,
-    pub inode:      u64,
-    pub device:     u64,
-    pub owner_uid:  u32,
-    pub mtime:      SystemTime,
+    pub dir_id:    u64,
+    pub path:      PathBuf,
+    pub parent_id: Option<u64>,
+    pub inode:     u64,
+    pub device:    u64,
+    pub owner_uid: u32,
+    pub mtime:     SystemTime,
 }
 
+/// A batch of directory and file records produced by processing one [`WorkItem`].
+/// Sent from a worker thread to the writer thread via the result channel.
 #[derive(Debug)]
 pub struct CrawlBatch {
     pub dirs:  Vec<DirRecord>,
     pub files: Vec<FileRecord>,
 }
 
+/// A unit of work dispatched to a worker thread, describing a directory to scan.
 #[derive(Debug, Clone)]
 pub enum WorkItem {
+    /// Full directory scan: stat every entry unconditionally.
     FullScan {
-        path:   PathBuf, // dir path
-        dir_id: u64,           // dir ID, see crawler.rs
-        parent_id: Option<u64> // parent dir ID, see crawler.rs
+        path:      PathBuf,     // dir path
+        dir_id:    u64,         // dir ID, see crawler.rs
+        parent_id: Option<u64>, // parent dir ID, see crawler.rs
     },
+    /// Incremental scan: skip entries whose mtime predates `last_seen_mtime`.
     DeltaScan {
         path:            PathBuf,
         dir_id:          u64,
-        parent_id: Option<u64>, // parent dir ID, see crawler.rs
+        parent_id:       Option<u64>, // parent dir ID, see crawler.rs
         last_seen_mtime: SystemTime,
     },
-    /// Not implemented, maybe in a bright bold future something.
-    FileRefresh{
-        path:   PathBuf,
-        dir_id: u64,
-        parent_id: Option<u64> // parent dir ID, see crawler.rs
-
+    /// Good news, everyone! FileRefresh will be implemented in the bright bold distant future.
+    FileRefresh {
+        path:      PathBuf,
+        dir_id:    u64,
+        parent_id: Option<u64>, // parent dir ID, see crawler.rs
     },
 }
 
+/// Processing result for a single [`WorkItem`]. Contains a batch of scanned records
+/// ready to be written, a collection of errors that were silenced so the crawl can
+/// continue, and subdirectories queued for further scanning.
 #[derive(Debug)]
 pub struct DirResult {
     pub batch:   CrawlBatch,
@@ -83,10 +101,16 @@ pub struct DirResult {
     pub subdirs: Vec<WorkItem>,
 }
 
+/// Errors that can occur while scanning a directory entry.
 #[derive(Debug)]
 pub enum CrawlError {
+    /// The process lacks permission to read or stat this path.
     PermissionDenied(PathBuf),
+    /// The entry disappeared between `getdents` and `statx` (TOCTOU race).
     NotFound(PathBuf),
+    /// An unexpected IO error occurred. The [`PathBuf`] is the affected entry,
+    /// the [`std::io::Error`] is the underlying OS error.
     IoError(PathBuf, std::io::Error),
+    /// Symlink chain for this path exceeded the OS limit (ELOOP).
     TooManySymlinks(PathBuf),
 }

@@ -38,6 +38,16 @@ use crate::types::{DirResult, WorkItem};
 ///                │  bulk COPY to DB    │
 ///                └─────────────────────┘
 
+/// Worker thread.
+///
+/// Continuously pulls [`WorkItem`]s from the local deque.
+/// Falls back to stealing from the global injector or other workers' deques when empty.
+///
+/// For each item, calls [`process_work_item`] and:
+/// - Pushes any discovered subdirectories back onto the global queue
+/// - Sends the [`DirResult`] to the writer thread via `result_tx`
+///
+/// Exits when there is no work left and no other worker is active.
 pub fn worker_thread(
     local:        Worker<WorkItem>,
     global:       Arc<Injector<WorkItem>>,
@@ -78,6 +88,14 @@ pub fn worker_thread(
     }
 }
 
+/// Finds the next [`WorkItem`] to process.
+///
+/// Checks in order:
+/// 1. Local deque
+/// 2. Global injector (batch steal)
+/// 3. Other workers' deques
+///
+/// Returns `None` if all sources are empty.
 fn find_work(
     local:    &Worker<WorkItem>,
     global:   &Injector<WorkItem>,

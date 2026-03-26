@@ -1,8 +1,10 @@
 use crate::types::{DirResult, FileRecord};
 use crate::writers::{BufferingWriter, WriterError};
 
+/// Sort order for the file listing in [`TableWriter`].
 pub enum SortOrder { Path, Size, Owner }
 
+/// Unit used to display file sizes in [`TableWriter`].
 pub enum SizeUnit { Bytes, Kilobytes, Megabytes, Gigabytes }
 
 impl SizeUnit {
@@ -25,6 +27,10 @@ impl SizeUnit {
     }
 }
 
+/// Writes crawl results as a formatted, sorted table to stdout.
+///
+/// Implements [`BufferingWriter`], accumulating all results in memory before rendering.
+/// Column widths, sort order, and size unit are configurable at construction time.
 pub struct TableWriter {
     files:      Vec<FileRecord>,
 
@@ -42,6 +48,7 @@ pub struct TableWriter {
 }
 
 impl TableWriter {
+    /// Creates a new `TableWriter` with the given sort order and size unit.
     pub fn new(sort_order: SortOrder, size_unit: SizeUnit) -> Self {
         Self {
             files: Vec::new(),
@@ -54,6 +61,7 @@ impl TableWriter {
         }
     }
 
+    /// Formats a single row as a fixed-width string aligned to the configured column widths.
     fn format_row(&self, path: &str, size: f64, uid: u32) -> String {
         format!("{:<width_path$} {:>width_size$.2} {:>width_uid$}",
             path, size, uid,
@@ -63,6 +71,7 @@ impl TableWriter {
         )
     }
 
+    /// Prints the table header row and a separator line.
     fn print_header(&self) {
         let size_label = format!("Size ({})", self.size_unit.label());
         println!("{:<width_path$} {:>width_size$} {:>width_uid$}",

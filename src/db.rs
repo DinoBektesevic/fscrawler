@@ -75,6 +75,10 @@ use crate::writers::WriterError;
 /// \i fs_crawler/sql/02_schema_permissions.sql
 ///
 
+/// Opens a connection pool to the PostgreSQL database at `database_url`.
+///
+/// Sets the `search_path` to the `crawler` schema on every new connection,
+/// so table names do not need to be schema-qualified in queries.
 pub async fn async_connect(database_url: &str) -> Result<PgPool, WriterError> {
     let pool = PgPoolOptions::new()
         .after_connect(
@@ -91,6 +95,10 @@ pub async fn async_connect(database_url: &str) -> Result<PgPool, WriterError> {
     Ok(pool)
 }
 
+/// Synchronous wrapper around [`async_connect`] for use in non-async contexts.
+///
+/// Builds a single-threaded Tokio runtime, runs [`async_connect`] to completion,
+/// and returns the pool. The runtime is dropped after the call.
 pub fn sync_connect(database_url: &str) -> Result<PgPool, WriterError> {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -100,6 +108,53 @@ pub fn sync_connect(database_url: &str) -> Result<PgPool, WriterError> {
     rt.block_on(async_connect(database_url))
 }
 
+/// Creates all crawler tables and indices in the `crawler` schema.
+///
+/// Foreign key constraints are intentionally omitted here and added post-crawl
+/// by [`post_crawl`] to allow fast constraint-free bulk COPY ingestion.
+///
+/// ```sql
+/// CREATE TABLE users (
+///     uid      BIGINT PRIMARY KEY,
+///     username TEXT,
+///     gid      BIGINT
+/// );
+/// CREATE TABLE directories (
+///     dir_id    BIGINT PRIMARY KEY,
+///     path      TEXT NOT NULL,
+///     parent_id BIGINT,
+///     owner_uid BIGINT,
+///     mtime     TIMESTAMPTZ,
+///     last_seen TIMESTAMPTZ NOT NULL
+/// );
+/// CREATE TABLE files (
+///     file_id        BIGINT PRIMARY KEY,
+///     dir_id         BIGINT,
+///     filename       TEXT NOT NULL,
+///     size_bytes     BIGINT NOT NULL,
+///     owner_uid      BIGINT,
+///     atime          TIMESTAMPTZ,
+///     mtime          TIMESTAMPTZ,
+///     ctime          TIMESTAMPTZ,
+///     inode          BIGINT,
+///     hardlink_count INT,
+///     last_seen      TIMESTAMPTZ NOT NULL
+/// );
+/// CREATE TABLE directory_stats (
+///     dir_id        BIGINT PRIMARY KEY,
+///     direct_bytes  BIGINT,
+///     subtree_bytes BIGINT,
+///     file_count    BIGINT,
+///     subtree_count BIGINT,
+///     last_computed TIMESTAMPTZ NOT NULL
+/// );
+/// CREATE TABLE directory_closure (
+///     ancestor_id   BIGINT,
+///     descendant_id BIGINT,
+///     depth         INT NOT NULL,
+///     PRIMARY KEY (ancestor_id, descendant_id)
+/// );
+/// ```
 pub async fn create_tables(pool: &PgPool) -> Result<(), WriterError>{
     // set search path for this connection so we don't have to
     // qualify every table name with crawler.tablename
@@ -196,7 +251,7 @@ pub async fn create_tables(pool: &PgPool) -> Result<(), WriterError>{
     Ok(())
 }
 
-// sync wrapper for main.rs
+/// Synchronous wrapper: connects to `database_url` and runs [`create_tables`].
 pub fn run_create(database_url: &str) -> Result<PgPool, WriterError> {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -210,6 +265,15 @@ pub fn run_create(database_url: &str) -> Result<PgPool, WriterError> {
     })
 }
 
+/// Drops all foreign key constraints and truncates all crawler tables.
+///
+/// Constraints are dropped with `IF EXISTS` so this is safe to call on a freshly
+/// created schema with no constraints yet. Typically followed by [`create_tables`]
+/// to restore the schema to a clean state — see [`run_clear`].
+///
+/// Note: `IF NOT EXISTS` in [`create_tables`] means schema changes are not applied
+/// to existing tables. If the schema has been updated, tables must be dropped manually
+/// before running [`run_clear`].
 pub async fn clear_tables(pool: &PgPool) -> Result<(), WriterError> {
     for stmt in [
         "ALTER TABLE files           DROP CONSTRAINT IF EXISTS fk_files_owner",
@@ -230,7 +294,7 @@ pub async fn clear_tables(pool: &PgPool) -> Result<(), WriterError> {
     Ok(())
 }
 
-// sync wrapper for main.rs
+/// Synchronous wrapper: connects to `database_url`, runs [`clear_tables`] then [`create_tables`].
 pub fn run_clear(database_url: &str) -> Result<PgPool, WriterError> {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -244,6 +308,13 @@ pub fn run_clear(database_url: &str) -> Result<PgPool, WriterError> {
     })
 }
 
+/// Finalises the crawl by populating the `users` table and adding foreign key constraints.
+///
+/// Runs after all COPY ingestion is complete. Performs two steps:
+///
+/// - Populates `users` with all distinct `owner_uid` values seen in `files` and `directories`
+/// - Adds foreign key constraints to `directories`, `files`, and `directory_stats`
+///   that were deliberately omitted during ingestion for performance
 pub async fn post_crawl(pool: &PgPool) -> Result<(), WriterError> {
     // 1. populate users from distinct uids seen in crawl
     sqlx::query(
@@ -291,7 +362,7 @@ pub async fn post_crawl(pool: &PgPool) -> Result<(), WriterError> {
     Ok(())
 }
 
-// synchronous wrapper for main.rs
+/// Synchronous wrapper: connects to `database_url` and runs [`post_crawl`].
 pub fn run_post_crawl(database_url: &str) -> Result<(), WriterError> {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -304,6 +375,14 @@ pub fn run_post_crawl(database_url: &str) -> Result<(), WriterError> {
     })
 }
 
+/// Builds the directory closure table and computes per-directory size statistics.
+///
+/// Runs after [`post_crawl`]. Performs two steps:
+///
+/// - Populates `directory_closure` using a recursive CTE that walks the directory
+///   tree, recording every ancestor-descendant pair and its depth
+/// - Populates `directory_stats` with direct and subtree byte counts and file counts
+///   for every directory, derived from the closure table and `files`
 pub async fn finish(pool: &PgPool) -> Result<(), WriterError>{
     sqlx::query(
         "WITH RECURSIVE closure(ancestor_id, descendant_id, depth) AS (
@@ -363,7 +442,7 @@ pub async fn finish(pool: &PgPool) -> Result<(), WriterError>{
     Ok(())
 }
 
-// synchronous wrapper for main.rs
+/// Synchronous wrapper: connects to `database_url` and runs [`finish`].
 pub fn run_finish(database_url: &str) -> Result<(), WriterError> {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -381,8 +460,13 @@ pub fn run_finish(database_url: &str) -> Result<(), WriterError> {
 //                             TODO
 // ############################################################
 // Probably best to implement as a standalone outside of db.rs, idk
-// Not functional atm.
-// reads /etc/passwd and returns (uid, username) pairs
+
+/// Reads `/etc/passwd` and returns a list of `(uid, username, gid)` entries.
+///
+/// Parses the colon-delimited passwd format. Lines that cannot be parsed are silently skipped.
+///
+/// Currently unused — intended for use with [`add_usernames`].
+#[allow(dead_code)]
 fn read_passwd_file() -> Result<Vec<(u32, String, u32)>, WriterError> {
     use std::io::{BufRead, BufReader};
     use std::fs::File;
@@ -406,6 +490,13 @@ fn read_passwd_file() -> Result<Vec<(u32, String, u32)>, WriterError> {
     Ok(entries)
 }
 
+/// Updates the `users` table with usernames and GIDs read from `/etc/passwd`.
+///
+/// Matches on `uid` and sets `username` and `gid` for any users already present
+/// in the table. Users not found in `/etc/passwd` are left unchanged.
+///
+/// Currently unused — call after [`post_crawl`] to enrich the `users` table.
+#[allow(dead_code)]
 pub async fn add_usernames(pool: &PgPool) -> Result<(), WriterError>{
     // add usernames from /etc/passwd via a temporary table
     //  we read the OS passwd entries and update the users table
