@@ -251,7 +251,6 @@ impl PostgresWriter {
         Ok(())
     }
 
-    /// Bulk-inserts a slice of [`DirRecord`]s via binary COPY.
     async fn copy_dirs(pool: &sqlx::PgPool, dirs: &[DirRecord]) -> Result<(), WriterError> {
         let mut copy = pool
             .copy_in_raw(

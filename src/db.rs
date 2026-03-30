@@ -3,6 +3,46 @@ use sqlx::postgres::PgPoolOptions;
 use crate::writers::WriterError;
 
 
+// ////////////////////////////////////////////////////////////////////////////
+//                              Queries
+// ////////////////////////////////////////////////////////////////////////////
+
+/// Queries the maximum file_id and dir_id currently in the database.
+/// Returns (0, 0) if tables do not exist yet or are empty — safe to call
+/// before --create-tables has been run.
+pub async fn query_max_ids(pool: &PgPool) -> Result<(u64, u64), WriterError> {
+    let file_max = query_max_id(pool, "SELECT COALESCE(MAX(file_id), 0) FROM files").await?;
+    let dir_max  = query_max_id(pool, "SELECT COALESCE(MAX(dir_id), 0) FROM directories").await?;
+    Ok((file_max, dir_max))
+}
+
+// Runs a MAX query, returning 0 if the table does not exist yet (PG error 42P01).
+async fn query_max_id(pool: &PgPool, sql: &str) -> Result<u64, WriterError> {
+    match sqlx::query_scalar::<_, i64>(sql).fetch_one(pool).await {
+        Ok(val)  => Ok(val as u64),
+        Err(sqlx::Error::Database(e)) if e.code().as_deref() == Some("42P01") => Ok(0),
+        Err(e)   => Err(WriterError::Database(e.to_string())),
+    }
+}
+
+/// Synchronous wrapper: connects to `database_url` and runs [`query_max_ids`].
+pub fn run_query_max_ids(database_url: &str) -> Result<(u64, u64), WriterError> {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("failed to build tokio runtime");
+    rt.block_on(async {
+        let pool = async_connect(database_url).await?;
+        query_max_ids(&pool).await
+    })
+}
+
+
+// ////////////////////////////////////////////////////////////////////////////
+//                              DB Table Management
+//                         creation, deletion, truncation
+// ////////////////////////////////////////////////////////////////////////////
+
 /// The database expects the crawler_manager_role to
 /// exists. Briefly, configure the database as follows:
 ///
@@ -333,18 +373,24 @@ pub async fn post_crawl(pool: &PgPool) -> Result<(), WriterError> {
         .map_err(|e| WriterError::Database(e.to_string()))?;
 
     sqlx::query(
-        "ALTER TABLE directories
-         ADD CONSTRAINT fk_directories_owner  FOREIGN KEY (owner_uid) REFERENCES users(uid),
-         ADD CONSTRAINT fk_directories_parent FOREIGN KEY (parent_id) REFERENCES directories(dir_id)"
+        "DO $$ BEGIN
+             ALTER TABLE directories
+             ADD CONSTRAINT fk_directories_owner  FOREIGN KEY (owner_uid) REFERENCES users(uid),
+             ADD CONSTRAINT fk_directories_parent FOREIGN KEY (parent_id) REFERENCES directories(dir_id)
+         EXCEPTION WHEN duplicate_object THEN NULL
+         END $$"
     )
         .execute(pool)
         .await
         .map_err(|e| WriterError::Database(e.to_string()))?;
 
     sqlx::query(
-        "ALTER TABLE files
-         ADD CONSTRAINT fk_files_owner FOREIGN KEY (owner_uid) REFERENCES users(uid),
-         ADD CONSTRAINT fk_files_dir   FOREIGN KEY    (dir_id) REFERENCES directories(dir_id)"
+        "DO $$ BEGIN
+             ALTER TABLE files
+             ADD CONSTRAINT fk_files_owner FOREIGN KEY (owner_uid) REFERENCES users(uid),
+             ADD CONSTRAINT fk_files_dir   FOREIGN KEY    (dir_id) REFERENCES directories(dir_id)
+         EXCEPTION WHEN duplicate_object THEN NULL
+         END $$"
     )
         .execute(pool)
         .await
@@ -352,8 +398,11 @@ pub async fn post_crawl(pool: &PgPool) -> Result<(), WriterError> {
 
 
     sqlx::query(
-        "ALTER TABLE directory_stats
-         ADD CONSTRAINT fk_dir_stats_owner FOREIGN KEY (dir_id) REFERENCES directories(dir_id)"
+        "DO $$ BEGIN
+             ALTER TABLE directory_stats
+             ADD CONSTRAINT fk_dir_stats_owner FOREIGN KEY (dir_id) REFERENCES directories(dir_id)
+         EXCEPTION WHEN duplicate_object THEN NULL
+         END $$"
     )
         .execute(pool)
         .await
@@ -361,6 +410,12 @@ pub async fn post_crawl(pool: &PgPool) -> Result<(), WriterError> {
 
     Ok(())
 }
+
+
+// ////////////////////////////////////////////////////////////////////////////
+//                              DB Data Management
+//                       insertion, table building, closures
+// ////////////////////////////////////////////////////////////////////////////
 
 /// Synchronous wrapper: connects to `database_url` and runs [`post_crawl`].
 pub fn run_post_crawl(database_url: &str) -> Result<(), WriterError> {
@@ -456,10 +511,11 @@ pub fn run_finish(database_url: &str) -> Result<(), WriterError> {
 }
 
 
-// ############################################################
-//                             TODO
-// ############################################################
-// Probably best to implement as a standalone outside of db.rs, idk
+
+// ////////////////////////////////////////////////////////////////////////////
+//                              TODO
+//       Probably best to implement as a standalone outside of db.rs, idk
+// ////////////////////////////////////////////////////////////////////////////
 
 /// Reads `/etc/passwd` and returns a list of `(uid, username, gid)` entries.
 ///

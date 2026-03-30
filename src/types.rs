@@ -10,6 +10,18 @@ use std::sync::atomic::{AtomicU64, Ordering};
 static FILE_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
 static DIR_ID_COUNTER:  AtomicU64 = AtomicU64::new(1);
 
+/// Seeds the file ID counter from the highest ID already present in the database.
+/// Call at startup before crawling to avoid primary key conflicts on re-run.
+pub fn seed_file_id(max_seen: u64) {
+    FILE_ID_COUNTER.store(max_seen + 1, Ordering::Relaxed);
+}
+
+/// Seeds the directory ID counter from the highest ID already present in the database.
+/// Call at startup before crawling to avoid primary key conflicts on re-run.
+pub fn seed_dir_id(max_seen: u64) {
+    DIR_ID_COUNTER.store(max_seen + 1, Ordering::Relaxed);
+}
+
 /// Global shared atomic file ID counter. Determines the primary, and subsequently foreign,
 /// keys before inserting into DB. IDs will reset to 1 if crawler is executed again,
 /// which will lead to conflicts. Fix is pending.
@@ -23,7 +35,6 @@ pub fn next_file_id() -> u64 {
 pub fn next_dir_id() -> u64 {
     DIR_ID_COUNTER.fetch_add(1, Ordering::Relaxed)
 }
-
 
 // core data structs
 

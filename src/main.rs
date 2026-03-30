@@ -34,6 +34,9 @@ fn main() {
         std::process::exit(1);
     }
 
+    // ////////////////////////////////////////////////////////////////////////////
+    //                              DB Management
+    // ////////////////////////////////////////////////////////////////////////////
     // if --create-tables is the only goal, run it and exit early
     if cli.create_tables {
         match fscrawler::db::run_create(&cli.database_url.unwrap()) {
@@ -58,8 +61,24 @@ fn main() {
         std::process::exit(0);
     }
 
-    // Set up
-    // - the number of workers
+    // Seed ID counters from DB max to avoid primary key conflicts on re-run
+    if let OutputMode::Postgres = cli.output {
+        match fscrawler::db::run_query_max_ids(cli.database_url.as_ref().unwrap()) {
+            Ok((file_max, dir_max)) => {
+                fscrawler::types::seed_file_id(file_max);
+                fscrawler::types::seed_dir_id(dir_max);
+            }
+            Err(e) => {
+                eprintln!("error: failed to query max IDs from database: {}", e);
+                std::process::exit(1);
+            }
+        }
+    }
+
+    // ////////////////////////////////////////////////////////////////////////
+    //                              Crawling
+    // ////////////////////////////////////////////////////////////////////////
+    // Set up workers
     let num_workers = cli.workers
         .unwrap_or_else(|| {
             std::thread::available_parallelism()
@@ -156,7 +175,7 @@ fn main() {
     // to gain the COPY throughput benefits of constraint-free bulk inserts
     if let OutputMode::Postgres = cli.output {
         let url = cli.database_url.as_ref().unwrap();
-        match fscrawler::db::run_post_crawl(&url) {
+        match fscrawler::db::run_post_crawl(url) {
             Ok(_) => println!("Post-crawl successful!"),
             Err(e) => eprintln!("Post-crawl failure: {}", e),
         }
