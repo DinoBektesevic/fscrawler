@@ -112,7 +112,10 @@ impl Cli {
                     return Err("--database-url conflicts with --config-path".to_string());
                 }
                 if self.workers.is_some() {
-                    return Err("--workers conflicts with --config-path (set per-filesystem in config)".to_string());
+                    return Err(
+                        "--workers conflicts with --config-path (set per-filesystem in config)"
+                            .to_string()
+                    );
                 }
                 let mut config = read_config(&p).map_err(|e: ConfigError| e.to_string())?;
                 config.output = OutputMode::Postgres;

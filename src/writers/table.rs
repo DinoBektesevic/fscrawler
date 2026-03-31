@@ -41,7 +41,7 @@ pub struct TableWriter {
     sort_order: SortOrder,
     size_unit:  SizeUnit,
 
-    // a compile-time printing table formatting options
+    // column widths used when formatting output
     col_path:   usize,
     col_size:   usize,
     col_uid:    usize,

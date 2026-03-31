@@ -3,10 +3,9 @@ use std::time::SystemTime;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 
-// these are my global shared atomic counters
-// we need these to autoincrement uniquely, but not necessarily in order
-// so that we can determine our foreign key restrictions before insert
-// and not have to query for each individual one
+// Global counters shared across all worker threads. Atomically incremented so
+// every record gets a unique ID without querying the database. Seeded from the
+// DB max at startup so re-runs do not produce primary key conflicts.
 static FILE_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
 static DIR_ID_COUNTER:  AtomicU64 = AtomicU64::new(1);
 
@@ -22,16 +21,18 @@ pub fn seed_dir_id(max_seen: u64) {
     DIR_ID_COUNTER.store(max_seen + 1, Ordering::Relaxed);
 }
 
-/// Global shared atomic file ID counter. Determines the primary, and subsequently foreign,
-/// keys before inserting into DB. IDs will reset to 1 if crawler is executed again,
-/// which will lead to conflicts. Fix is pending.
+/// Returns the next unique file ID, incrementing the global counter atomically.
+///
+/// IDs are unique within a single process. Call [`seed_file_id`] at startup
+/// to avoid conflicts with IDs already present in the database.
 pub fn next_file_id() -> u64 {
     FILE_ID_COUNTER.fetch_add(1, Ordering::Relaxed)
 }
 
-/// Global shared atomic directory ID counter. Determines the primary, and subsequently foreign,
-/// keys before inserting into DB. IDs will reset to 1 if crawler is executed again,
-/// which will lead to conflicts. Fix is pending.
+/// Returns the next unique directory ID, incrementing the global counter atomically.
+///
+/// IDs are unique within a single process. Call [`seed_dir_id`] at startup
+/// to avoid conflicts with IDs already present in the database.
 pub fn next_dir_id() -> u64 {
     DIR_ID_COUNTER.fetch_add(1, Ordering::Relaxed)
 }

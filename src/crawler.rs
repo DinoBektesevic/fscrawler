@@ -142,10 +142,10 @@ pub fn process_work_item(path: &Path, current_dirid: u64, parent_dirid: Option<u
                 // work queue, but figure out its dir ID **HERE**. This way we
                 // can track the dir_id for files and subdirs.
                 let new_dirid = next_dir_id();
-                subdirs.push(WorkItem::FullScan{
-                    path:   entry_path.clone(),
-                    dir_id: new_dirid,
-                    parent_id: Some(current_dirid)
+                subdirs.push(WorkItem::FullScan {
+                    path:      entry_path.clone(),
+                    dir_id:    new_dirid,
+                    parent_id: Some(current_dirid),
                 });
             }
             FileType::RegularFile => {

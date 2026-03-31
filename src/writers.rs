@@ -111,5 +111,4 @@ pub fn buffering_writer_thread<W: BufferingWriter>(
         writer.accumulate(result);
     }
     writer.render()
-
 }

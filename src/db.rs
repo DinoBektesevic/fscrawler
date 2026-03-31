@@ -195,7 +195,7 @@ pub fn sync_connect(database_url: &str) -> Result<PgPool, WriterError> {
 ///     PRIMARY KEY (ancestor_id, descendant_id)
 /// );
 /// ```
-pub async fn create_tables(pool: &PgPool) -> Result<(), WriterError>{
+pub async fn create_tables(pool: &PgPool) -> Result<(), WriterError> {
     // set search path for this connection so we don't have to
     // qualify every table name with crawler.tablename
     sqlx::query("SET search_path TO crawler")
@@ -281,7 +281,7 @@ pub async fn create_tables(pool: &PgPool) -> Result<(), WriterError>{
         "CREATE INDEX IF NOT EXISTS idx_closure_anc    ON directory_closure(ancestor_id)",
         "CREATE INDEX IF NOT EXISTS idx_closure_desc   ON directory_closure(descendant_id)"
     ];
-    for &query in indices.iter(){
+    for &query in indices.iter() {
         sqlx::query(query)
             .execute(pool)
             .await
@@ -437,7 +437,7 @@ pub fn run_post_crawl(database_url: &str) -> Result<(), WriterError> {
 ///   tree, recording every ancestor-descendant pair and its depth
 /// - Populates `directory_stats` with direct and subtree byte counts and file counts
 ///   for every directory, derived from the closure table and `files`
-pub async fn finish(pool: &PgPool) -> Result<(), WriterError>{
+pub async fn finish(pool: &PgPool) -> Result<(), WriterError> {
     sqlx::query(
         "WITH RECURSIVE closure(ancestor_id, descendant_id, depth) AS (
             -- every directory is its own ancestor at depth 0
@@ -510,7 +510,6 @@ pub fn run_finish(database_url: &str) -> Result<(), WriterError> {
 }
 
 
-
 // ////////////////////////////////////////////////////////////////////////////
 //                              TODO
 //       Probably best to implement as a standalone outside of db.rs, idk
@@ -552,7 +551,7 @@ fn read_passwd_file() -> Result<Vec<(u32, String, u32)>, WriterError> {
 ///
 /// Currently unused — call after [`post_crawl`] to enrich the `users` table.
 #[allow(dead_code)]
-pub async fn add_usernames(pool: &PgPool) -> Result<(), WriterError>{
+pub async fn add_usernames(pool: &PgPool) -> Result<(), WriterError> {
     // add usernames from /etc/passwd via a temporary table
     //  we read the OS passwd entries and update the users table
     let passwd_entries = read_passwd_file()?;
