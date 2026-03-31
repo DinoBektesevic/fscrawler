@@ -35,3 +35,7 @@ dashmap = "6"
 # Timestamp handling (maps to sqlx chrono feature)
 chrono = { version = "0.4", features = ["serde"] }
 bytes = "1.11.1"
+
+# de/serialization
+serde = { version = "1", features = ["derive"] }
+toml  = "0.8"

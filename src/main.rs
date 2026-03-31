@@ -5,7 +5,7 @@ use std::sync::atomic::AtomicUsize;
 use crossbeam::deque::{Injector, Worker};
 
 use clap::Parser;
-use fscrawler::cli::{Cli, OutputMode};
+use fscrawler::cli::{Cli};
 use fscrawler::types::{WorkItem, next_dir_id};
 use fscrawler::worker::worker_thread;
 
@@ -18,52 +18,44 @@ use fscrawler::writers::table::{TableWriter, SortOrder, SizeUnit};
 fn main() {
     let cli = Cli::parse();
 
-    // validate postgres url is provided when needed
-    if cli.create_tables && cli.database_url.is_none() {
-        eprintln!("error: --database-url required when --create-tables provided");
-        std::process::exit(1);
-    }
-
-    if matches!(cli.output, OutputMode::Postgres) && cli.database_url.is_none() {
-        eprintln!("error: --database-url required when --output=postgres");
-        std::process::exit(1);
-    }
-
-    if cli.clear && cli.database_url.is_none() {
-        eprintln!("error: --database-url required when --clear provided");
-        std::process::exit(1);
-    }
+    let config = match cli.resolve() {
+        Ok(c)  => c,
+        Err(e) => { eprintln!("{}", e); std::process::exit(1); }
+    };
 
     // ////////////////////////////////////////////////////////////////////////////
     //                              DB Management
     // ////////////////////////////////////////////////////////////////////////////
     // if --create-tables is the only goal, run it and exit early
     if cli.create_tables {
-        match fscrawler::db::run_create(&cli.database_url.unwrap()) {
+        let url = config.server.connection_string.as_deref().unwrap_or_else(|| {
+            eprintln!("error: --database-url required when --create-tables provided");
+            std::process::exit(1);
+        });
+
+        match fscrawler::db::run_create(url) {
             Ok(_)  => println!("Database tables created successfully."),
-            Err(e) => {
-                eprintln!("Failed to create tables: {}", e);
-                std::process::exit(1);
-            }
+            Err(e) => { eprintln!("Failed to create tables: {}", e); std::process::exit(1); }
         }
         std::process::exit(0);
     }
 
     // if --clear is the only goal, truncate all tables, re-initialise schema and exit early
     if cli.clear {
-        match fscrawler::db::run_clear(&cli.database_url.unwrap()) {
+        let url = config.server.connection_string.as_deref().unwrap_or_else(|| {
+            eprintln!("error: --database-url required when --clear provided");
+            std::process::exit(1);
+        });
+        match fscrawler::db::run_clear(url) {
             Ok(_)  => println!("Tables cleared and re-initialised."),
-            Err(e) => {
-                eprintln!("Failed to clear tables: {}", e);
-                std::process::exit(1);
-            }
+            Err(e) => { eprintln!("Failed to clear tables: {}", e); std::process::exit(1); }
         }
         std::process::exit(0);
     }
 
     // Seed ID counters from DB max to avoid primary key conflicts on re-run
-    if let OutputMode::Postgres = cli.output {
-        match fscrawler::db::run_query_max_ids(cli.database_url.as_ref().unwrap()) {
+    if let Some(url) = &config.server.connection_string {
+        match fscrawler::db::run_query_max_ids(url) {
             Ok((file_max, dir_max)) => {
                 fscrawler::types::seed_file_id(file_max);
                 fscrawler::types::seed_dir_id(dir_max);
