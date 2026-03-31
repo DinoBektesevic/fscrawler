@@ -376,8 +376,8 @@ pub async fn post_crawl(pool: &PgPool) -> Result<(), WriterError> {
         "DO $$ BEGIN
              ALTER TABLE directories
              ADD CONSTRAINT fk_directories_owner  FOREIGN KEY (owner_uid) REFERENCES users(uid),
-             ADD CONSTRAINT fk_directories_parent FOREIGN KEY (parent_id) REFERENCES directories(dir_id)
-         EXCEPTION WHEN duplicate_object THEN NULL
+             ADD CONSTRAINT fk_directories_parent FOREIGN KEY (parent_id) REFERENCES directories(dir_id);
+         EXCEPTION WHEN duplicate_object THEN NULL;
          END $$"
     )
         .execute(pool)
@@ -388,20 +388,19 @@ pub async fn post_crawl(pool: &PgPool) -> Result<(), WriterError> {
         "DO $$ BEGIN
              ALTER TABLE files
              ADD CONSTRAINT fk_files_owner FOREIGN KEY (owner_uid) REFERENCES users(uid),
-             ADD CONSTRAINT fk_files_dir   FOREIGN KEY    (dir_id) REFERENCES directories(dir_id)
-         EXCEPTION WHEN duplicate_object THEN NULL
+             ADD CONSTRAINT fk_files_dir   FOREIGN KEY    (dir_id) REFERENCES directories(dir_id);
+         EXCEPTION WHEN duplicate_object THEN NULL;
          END $$"
     )
         .execute(pool)
         .await
         .map_err(|e| WriterError::Database(e.to_string()))?;
 
-
     sqlx::query(
         "DO $$ BEGIN
              ALTER TABLE directory_stats
-             ADD CONSTRAINT fk_dir_stats_owner FOREIGN KEY (dir_id) REFERENCES directories(dir_id)
-         EXCEPTION WHEN duplicate_object THEN NULL
+             ADD CONSTRAINT fk_dir_stats_owner FOREIGN KEY (dir_id) REFERENCES directories(dir_id);
+         EXCEPTION WHEN duplicate_object THEN NULL;
          END $$"
     )
         .execute(pool)
