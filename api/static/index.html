@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>fscrawler</title>
+  <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: ui-monospace, "Cascadia Code", "Source Code Pro", monospace;
+      font-size: 14px;
+      background: #0f1117;
+      color: #c9d1d9;
+      padding: 1.5rem;
+    }
+
+    h1 { font-size: 1.2rem; color: #58a6ff; margin-bottom: 1.5rem; }
+    h2 { font-size: 0.95rem; color: #8b949e; text-transform: uppercase;
+         letter-spacing: 0.08em; margin-bottom: 0.75rem; }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.5rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .panel {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      padding: 1rem;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    th {
+      color: #8b949e;
+      font-weight: normal;
+      text-align: left;
+      padding: 0.3rem 0.5rem;
+      border-bottom: 1px solid #30363d;
+    }
+
+    td {
+      padding: 0.3rem 0.5rem;
+      border-bottom: 1px solid #21262d;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 300px;
+    }
+
+    td.num { text-align: right; color: #79c0ff; }
+
+    tr.clickable { cursor: pointer; }
+    tr.clickable:hover td { background: #1f2937; }
+
+    .htmx-indicator { opacity: 0.4; }
+
+    #user-detail, #dir-view {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      padding: 1rem;
+      min-height: 3rem;
+    }
+
+    #user-detail table, #dir-view table { width: 100%; }
+
+    .detail-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.5rem;
+    }
+
+    .detail-label {
+      color: #8b949e;
+      font-size: 0.85rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .error { color: #f85149; }
+  </style>
+</head>
+<body>
+  <h1>fscrawler</h1>
+
+  <div class="grid">
+    <!-- Filesystems panel -->
+    <div class="panel">
+      <h2>Filesystems</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Path</th>
+            <th style="text-align:right">Size</th>
+            <th style="text-align:right">Files</th>
+          </tr>
+        </thead>
+        <tbody hx-get="/api/filesystems" hx-trigger="load" hx-swap="innerHTML">
+          <tr><td colspan="3" class="htmx-indicator">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Users panel -->
+    <div class="panel">
+      <h2>Users</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>User</th>
+            <th style="text-align:right">Total size</th>
+            <th style="text-align:right">Files</th>
+          </tr>
+        </thead>
+        <tbody hx-get="/api/users" hx-trigger="load" hx-swap="innerHTML">
+          <tr><td colspan="3" class="htmx-indicator">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Detail row — populated on click -->
+  <div class="detail-row">
+    <div>
+      <p class="detail-label">User breakdown by filesystem</p>
+      <div id="user-detail"></div>
+    </div>
+    <div>
+      <p class="detail-label">Directory browser</p>
+      <div id="dir-view"></div>
+    </div>
+  </div>
+</body>
+</html>

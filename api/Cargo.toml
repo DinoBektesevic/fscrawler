@@ -1,0 +1,31 @@
+[package]
+name    = "api"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Web framework
+axum = "0.8"
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Database — same version as fscrawler so sqlx types are compatible
+sqlx = { version = "0.8", features = [
+    "postgres",
+    "runtime-tokio",
+    "chrono",
+] }
+
+# Serialization
+serde      = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Static file serving
+tower-http = { version = "0.6", features = ["fs"] }
+
+# Shared types from the crawler (FileRecord, DirRecord, config types etc.)
+fscrawler = { path = "../fscrawler" }
