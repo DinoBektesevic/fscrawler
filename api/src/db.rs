@@ -21,6 +21,7 @@ pub struct UserFsBreakdownRow {
     pub filesystem: String,
     pub bytes:      i64,
     pub file_count: i64,
+    pub dir_id:     i64,
 }
 
 #[derive(FromRow)]
@@ -29,6 +30,24 @@ pub struct DirChildRow {
     pub path:          String,
     pub subtree_bytes: i64,
     pub subtree_count: i64,
+}
+
+#[derive(FromRow)]
+pub struct UserDirChildRow {
+    pub dir_id: i64,
+    pub path: String,
+    pub user_bytes: i64,
+    pub user_files: i64,
+    pub last_mtime: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+#[derive(FromRow)]
+pub struct UserTreeRow {
+    pub dir_id:     i64,
+    pub path:       String,
+    pub user_bytes: i64,
+    pub user_files: i64,
+    pub last_mtime: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 pub async fn get_filesystems(pool: &PgPool) -> Result<Vec<FilesystemRow>, sqlx::Error> {
@@ -66,16 +85,14 @@ pub async fn get_user_breakdown(
     uid: i64,
 ) -> Result<Vec<UserFsBreakdownRow>, sqlx::Error> {
     sqlx::query_as::<_, UserFsBreakdownRow>(
-        "SELECT d_root.path                            AS filesystem,
-                COALESCE(SUM(f.size_bytes), 0)::bigint AS bytes,
-                COUNT(f.file_id)                       AS file_count
-         FROM files f
-         JOIN directory_closure dc ON dc.descendant_id = f.dir_id
-         JOIN directories d_root   ON d_root.dir_id = dc.ancestor_id
-                                  AND d_root.parent_id IS NULL
-         WHERE f.owner_uid = $1
-         GROUP BY d_root.path
-         ORDER BY bytes DESC",
+        "SELECT us.dir_id,
+        d.path         AS filesystem,
+        us.total_bytes AS bytes,
+        us.file_count
+            FROM user_stats us
+            JOIN directories d ON d.dir_id = us.dir_id
+        WHERE us.uid = $1
+            ORDER BY us.total_bytes DESC"
     )
     .bind(uid)
     .fetch_all(pool)
@@ -111,4 +128,46 @@ pub async fn get_dir_children(
     .bind(dir_id)
     .fetch_all(pool)
     .await
+}
+
+pub async fn get_user_dir_children(
+    pool: &PgPool,
+    dir_id: i64,
+    uid: i64) -> Result<Vec<UserDirChildRow>, sqlx::Error>{
+    sqlx::query_as::<_, UserDirChildRow>(
+        "SELECT d.dir_id, d.path,
+         COALESCE(SUM(f.size_bytes), 0)::bigint AS user_bytes,
+         COUNT(f.file_id)::bigint               AS user_files,
+         MAX(f.mtime)                           AS last_mtime
+         FROM directories d
+         JOIN directory_closure dc ON dc.ancestor_id = d.dir_id
+         JOIN files f              ON f.dir_id = dc.descendant_id AND f.owner_uid = $2
+         WHERE d.parent_id = $1
+         GROUP BY d.dir_id, d.path
+         ORDER BY user_bytes DESC"
+    )
+    .bind(dir_id)
+    .bind(uid)
+    .fetch_all(pool)
+    .await
+}
+
+pub async fn get_user_tree(
+    pool: &PgPool,
+    uid: i64) -> Result<Vec<UserTreeRow>, sqlx::Error>{
+    sqlx::query_as::<_, UserDirChildRow>(
+        "SELECT d.dir_id, d.path,
+         COALESCE(SUM(f.size_bytes), 0)::bigint AS user_bytes,
+         COUNT(f.file_id)::bigint               AS user_files,
+         MAX(f.mtime)                           AS last_mtime
+         FROM files f
+         JOIN directories d ON d.dir_id = f.dir_id
+         WHERE f.owner_uid = $1
+         GROUP BY d.dir_id, d.path
+         ORDER BY last_mtime DESC NULLS LAST
+         LIMIT 200"
+    )
+        .bind(uid)
+        .fetch_all(pool)
+        .await
 }

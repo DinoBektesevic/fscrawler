@@ -100,7 +100,7 @@ pub async fn user_detail(
     );
     for row in &rows {
         html.push_str(&format!(
-            "<tr>\
+            "<tr data-dir-id={dir}>\
                <td>{fs}</td>\
                <td class='num'>{size}</td>\
                <td class='num'>{count}</td>\
@@ -108,6 +108,7 @@ pub async fn user_detail(
             fs    = row.filesystem,
             size  = fmt_bytes(row.bytes),
             count = row.file_count,
+            dir   = row.dir_id,
         ));
     }
     html.push_str("</tbody></table>");
