@@ -287,6 +287,16 @@ pub async fn create_tables(pool: &PgPool) -> Result<(), WriterError> {
         .await
         .map_err(|e| WriterError::Database(e.to_string()))?;
 
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS crawl_runs (
+            id          BIGSERIAL PRIMARY KEY,
+            finished_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )"
+    )
+        .execute(pool)
+        .await
+        .map_err(|e| WriterError::Database(e.to_string()))?;
+
     let indices: [&'static str; 6] = [
         "CREATE INDEX IF NOT EXISTS idx_files_owner    ON files(owner_uid)",
         "CREATE INDEX IF NOT EXISTS idx_files_dir      ON files(dir_id)",
@@ -341,7 +351,7 @@ pub async fn clear_tables(pool: &PgPool) -> Result<(), WriterError> {
             .await
             .map_err(|e| WriterError::Database(e.to_string()))?;
     }
-    sqlx::query("TRUNCATE files, directory_closure, directories, users, directory_stats, user_stats")
+    sqlx::query("TRUNCATE files, directory_closure, directories, users, directory_stats, user_stats, crawl_runs")
         .execute(pool)
         .await
         .map_err(|e| WriterError::Database(e.to_string()))?;
@@ -519,6 +529,12 @@ pub async fn finish(pool: &PgPool) -> Result<(), WriterError> {
              SET total_bytes = EXCLUDED.total_bytes,
                  file_count  = EXCLUDED.file_count"
     )
+        .execute(pool)
+        .await
+        .map_err(|e| WriterError::Database(e.to_string()))?;
+
+    // Record crawl completion timestamp
+    sqlx::query("INSERT INTO crawl_runs (finished_at) VALUES (NOW())")
         .execute(pool)
         .await
         .map_err(|e| WriterError::Database(e.to_string()))?;

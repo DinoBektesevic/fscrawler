@@ -77,6 +77,7 @@ pub async fn users(State(pool): State<PgPool>) -> Html<String> {
                  <td>{name}</td>
                  <td class="num"><span class="num-val">{size}</span><span class="bar-wrap"><span class="bar"></span></span></td>
                  <td class="num">{files}</td>
+                 <td class="dim"><a class="mydisk-link" href="/mydisk/{uid}">↗</a></td>
                </tr>"#,
             uid   = row.uid,
             name  = row.display_name,
@@ -155,9 +156,10 @@ pub async fn user_dir_children(
     };
 
     let html = rows.iter().map(|row| {
-        let name = row.path.split('/').next_back().unwrap_or(&row.path);
+        let name  = row.path.split('/').next_back().unwrap_or(&row.path);
+        let mtime = fmt_mtime(&row.last_mtime);
         format!(
-            r#"<tr class="clickable" data-dir-id="{dir_id}" data-bytes="{bytes}" data-files="{files}" data-name="{name}" data-path="{path}">
+            r#"<tr class="clickable" data-dir-id="{dir_id}" data-bytes="{bytes}" data-files="{files}" data-name="{name}" data-path="{path}" data-mtime="{mtime}">
                  <td>{name}</td>
                  <td class="num"><span class="num-val">{size}</span><span class="bar-wrap"><span class="bar"></span></span></td>
                  <td class="num">{files}</td>
@@ -169,7 +171,7 @@ pub async fn user_dir_children(
             bytes  = row.user_bytes,
             size   = fmt_bytes(row.user_bytes),
             files  = row.user_files,
-            mtime  = fmt_mtime(&row.last_mtime),
+            mtime  = mtime,
         )
     }).collect();
 
@@ -208,6 +210,17 @@ pub async fn user_tree(
 
 pub async fn mydisk_page(Path(_uid): Path<i64>) -> Html<&'static str> {
     Html(include_str!("../static/mydisk.html"))
+}
+
+pub async fn last_crawled(State(pool): State<PgPool>) -> Html<String> {
+    match db::get_last_crawled(&pool).await {
+        Ok(Some(dt)) => Html(
+            dt.with_timezone(&Los_Angeles)
+              .format("data as of %Y-%m-%d")
+              .to_string()
+        ),
+        _ => Html(String::new()),
+    }
 }
 
 pub async fn staleness(State(pool): State<PgPool>) -> Json<Vec<db::StalenessPoint>> {

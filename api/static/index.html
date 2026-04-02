@@ -34,9 +34,23 @@
       gap: 1.25rem;
     }
 
-    /* ── Header ── */
-    header h1  { font-size: 1.1rem; color: var(--accent); }
-    .subtitle  { color: var(--dim); font-weight: normal; }
+    /* ── Header / title bar ── */
+    .title-bar {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 1rem 1.25rem;
+      display: grid;
+      grid-template-columns: 520px 1fr;
+      align-items: center;
+      gap: 1.25rem;
+    }
+    .title-bar h1 { font-size: 1.1rem; color: var(--accent); }
+    .subtitle     { color: var(--dim); font-weight: normal; }
+    .title-stats { display: flex; align-items: flex-start; gap: 2rem; }
+    .title-stat { display: flex; flex-direction: column; gap: 0.1rem; }
+    .title-stat .stat-val { color: var(--num); font-size: 1rem; }
+    .title-stat .stat-lbl { color: var(--dim); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; }
 
     /* ── Section headings ── */
     h2 {
@@ -50,7 +64,7 @@
     /* ── Grid layout ── */
     .explorer-grid {
       display: grid;
-      grid-template-columns: 380px 1fr;
+      grid-template-columns: 520px 1fr;
       gap: 1.25rem;
       align-items: start;
     }
@@ -182,32 +196,13 @@
     .bc-sep { color: var(--border); }
     .bc-cur { color: var(--text); }
 
-    /* ── User detail section ── */
-    #user-detail-section {
-      opacity: 0;
-      transition: opacity 0.25s ease;
-    }
-
-    .section-bar {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-      margin-bottom: 0.5rem;
-    }
-    .section-bar h2 { margin-bottom: 0; }
-
-    .close-btn {
-      background: none;
-      border: 1px solid var(--border);
-      border-radius: 4px;
+    /* ── Mydisk link in users table ── */
+    .mydisk-link {
       color: var(--dim);
-      cursor: pointer;
-      font: inherit;
-      font-size: 0.72rem;
-      padding: 0.1rem 0.4rem;
-      margin-left: auto;
+      text-decoration: none;
+      font-size: 0.9rem;
     }
-    .close-btn:hover { color: var(--text); border-color: var(--dim); }
+    tr:hover .mydisk-link { color: var(--accent); }
 
     /* ── Staleness chart ── */
     .chart-wrap {
@@ -226,9 +221,25 @@
 </head>
 <body>
 
-  <header>
-    <h1>fscrawler <span class="subtitle">// filesystem index</span></h1>
-  </header>
+  <div class="title-bar", id="title-bar">
+      <div class="title-identity">
+          <h1>fscrawler <span class="subtitle">// filesystem index</span></h1>
+      </div>
+    <div class="title-stats">
+      <div class="title-stat">
+        <span class="stat-val" id="title-size">—</span>
+        <span class="stat-lbl">total size</span>
+      </div>
+      <div class="title-stat">
+        <span class="stat-val" id="title-files">—</span>
+        <span class="stat-lbl">files</span>
+      </div>
+      <div class="title-stat">
+        <span class="stat-val" id="title-crawled">—</span>
+        <span class="stat-lbl">last crawled</span>
+      </div>
+    </div>
+  </div>
 
   <!-- ── Section 1: Filesystems + Directory Browser ── -->
   <div class="explorer-grid">
@@ -255,7 +266,7 @@
       <div class="chart-wrap">
         <p class="chart-label">file age (last access)</p>
         <div>
-        <canvas id="staleness-chart" height="325"></canvas>
+        <canvas id="staleness-chart" height="325", max-height="325"></canvas>
         </div>
       </div>
     </div>
@@ -293,71 +304,28 @@
             <th data-col="name">User</th>
             <th data-col="bytes">Total size</th>
             <th data-col="files">Files</th>
+            <th></th>
           </tr>
         </thead>
         <tbody id="users-tbody"
                hx-get="/api/users"
                hx-trigger="load"
                hx-swap="innerHTML">
-          <tr><td colspan="3" class="hint">loading…</td></tr>
+          <tr><td colspan="4" class="hint">loading…</td></tr>
         </tbody>
       </table>
     </div>
   </div>
 
-  <!-- ── Section 3: User detail (hidden until a user is clicked) ── -->
-  <div class="explorer-grid" id="user-detail-section" style="display:none">
-
-    <div class="panel">
-      <div class="section-bar">
-        <h2 id="user-detail-heading">By filesystem</h2>
-        <button class="close-btn" onclick="closeUserDetail()">× close</button>
-      </div>
-      <table id="user-breakdown-table">
-        <thead>
-          <tr>
-            <th data-col="name">Filesystem</th>
-            <th data-col="bytes">Size</th>
-            <th data-col="files">Files</th>
-          </tr>
-        </thead>
-        <tbody id="user-breakdown-tbody"></tbody>
-      </table>
-    </div>
-
-    <div class="panel">
-      <div class="panel-header">
-        <h2>User directories</h2>
-        <nav id="user-dir-breadcrumb" class="breadcrumb"></nav>
-      </div>
-      <div class="scroll-body">
-        <table id="user-dir-table">
-          <thead>
-            <tr>
-              <th data-col="name">Path</th>
-              <th data-col="bytes">Size</th>
-              <th data-col="files">Files</th>
-              <th data-col="mtime">Modified</th>
-            </tr>
-          </thead>
-          <tbody id="user-dir-tbody" data-uid=""></tbody>
-        </table>
-      </div>
-    </div>
-
-  </div>
-
   <script>
     // ── State ────────────────────────────────────────────────────────────────
     const sortState = {};
-    const stacks    = { main: [], user: [] };
-    let   selectedUid = null;
+    const stack     = [];   // main dir browser breadcrumb
 
     // ── Sorting ──────────────────────────────────────────────────────────────
     function getSortVal(row, col) {
       if (col === 'bytes') return Number(row.dataset.bytes || 0);
       if (col === 'files') return Number(row.dataset.files || 0);
-      if (col === 'mtime') return row.dataset.mtime || '';
       return (row.dataset.name || '').toLowerCase();
     }
 
@@ -393,7 +361,7 @@
         th.addEventListener('click', () => {
           const st  = sortState[tbodyId];
           const col = th.dataset.col;
-          const asc = col === st.col ? !st.asc : (col === 'name' || col === 'mtime');
+          const asc = col === st.col ? !st.asc : (col === 'name');
           sortState[tbodyId] = { col, asc };
           sortTbody(tbodyId, col, asc);
           setActiveSort(tableId, col, asc);
@@ -401,7 +369,7 @@
       });
     }
 
-    // ── Size bars (background gradient on first column) ───────────────────────
+    // ── Size bars ────────────────────────────────────────────────────────────
     function updateBars(tbodyId) {
       const tbody = document.getElementById(tbodyId);
       if (!tbody) return;
@@ -423,55 +391,54 @@
         if (!td) return;
         td.style.position = 'relative';
         const btn = document.createElement('button');
-        btn.className = 'copy-btn';
-        btn.title     = 'Copy path';
+        btn.className   = 'copy-btn';
+        btn.title       = 'Copy path';
         btn.textContent = '⎘';
         btn.addEventListener('click', e => {
           e.stopPropagation();
           navigator.clipboard.writeText(row.dataset.path).then(() => {
             btn.textContent = '✓';
             btn.classList.add('copied');
-            setTimeout(() => {
-              btn.textContent = '⎘';
-              btn.classList.remove('copied');
-            }, 1500);
+            setTimeout(() => { btn.textContent = '⎘'; btn.classList.remove('copied'); }, 1500);
           });
         });
         td.appendChild(btn);
       });
     }
 
-    // ── After htmx settles: update bars, re-apply sort, show empty state ────
+    // ── After htmx settles ───────────────────────────────────────────────────
     document.addEventListener('htmx:afterSettle', e => {
       const id = e.detail.target?.id;
       if (!id) return;
       updateBars(id);
       const st = sortState[id];
       if (st) sortTbody(id, st.col, st.asc);
-      // Copy buttons for dir browsers
-      if (id === 'dir-tbody' || id === 'user-dir-tbody') addCopyButtons(id);
-      // Empty state
-      if (id === 'dir-tbody' || id === 'user-dir-tbody') {
+      if (id === 'fs-tbody') {
+        const rows = [...document.querySelectorAll('#fs-tbody tr[data-bytes]')];
+        const totalBytes = rows.reduce((s, r) => s + Number(r.dataset.bytes), 0);
+        const totalFiles = rows.reduce((s, r) => s + Number(r.dataset.files), 0);
+        document.getElementById('title-size').textContent  = fmtBytes(totalBytes);
+        document.getElementById('title-files').textContent = totalFiles.toLocaleString();
+      }
+      if (id === 'dir-tbody') {
+        addCopyButtons(id);
         const tbody = document.getElementById(id);
-        const cols  = id === 'user-dir-tbody' ? 4 : 3;
         if (tbody && tbody.querySelectorAll('tr[data-bytes]').length === 0) {
-          tbody.innerHTML = `<tr><td colspan="${cols}" class="hint">no subdirectories</td></tr>`;
+          tbody.innerHTML = '<tr><td colspan="3" class="hint">no subdirectories</td></tr>';
         }
       }
     });
 
     // ── Breadcrumb ───────────────────────────────────────────────────────────
-    function renderBreadcrumb(ctx) {
-      const bcId = ctx === 'user' ? 'user-dir-breadcrumb' : 'dir-breadcrumb';
-      const bc   = document.getElementById(bcId);
+    function renderBreadcrumb() {
+      const bc = document.getElementById('dir-breadcrumb');
       if (!bc) return;
-      const stack = stacks[ctx];
       let html = '';
-      if (stack.length > 1) html += `<button class="bc-up" onclick="goUp('${ctx}')">↑</button>`;
+      if (stack.length > 1) html += `<button class="bc-up" onclick="goUp()">↑</button>`;
       stack.forEach((seg, i) => {
         if (i > 0) html += '<span class="bc-sep">/</span>';
         if (i < stack.length - 1) {
-          html += `<button class="bc-seg" onclick="jumpTo('${ctx}',${i})">${seg.name}</button>`;
+          html += `<button class="bc-seg" onclick="jumpTo(${i})">${seg.name}</button>`;
         } else {
           html += `<span class="bc-cur">${seg.name}</span>`;
         }
@@ -479,108 +446,58 @@
       bc.innerHTML = html;
     }
 
-    function userDirUrl(uid, id) {
-      return id === 'tree'
-        ? `/api/users/${uid}/tree`
-        : `/api/users/${uid}/dirs/${id}`;
+    function navDir(id, name) {
+      stack.push({ id, name });
+      renderBreadcrumb();
+      htmx.ajax('GET', `/api/dirs/${id}`, { target: '#dir-tbody', swap: 'innerHTML' });
+      setActiveSort('dir-table', 'bytes', false);
     }
 
-    function navDir(ctx, id, name, uid) {
-      stacks[ctx].push({ id, name });
-      renderBreadcrumb(ctx);
-      const tbodyId = ctx === 'user' ? 'user-dir-tbody' : 'dir-tbody';
-      const tableId = ctx === 'user' ? 'user-dir-table' : 'dir-table';
-      const url     = (ctx === 'user' && uid) ? userDirUrl(uid, id) : `/api/dirs/${id}`;
-      htmx.ajax('GET', url, { target: '#' + tbodyId, swap: 'innerHTML' });
-      setActiveSort(tableId, 'bytes', false);
+    function jumpTo(idx) {
+      stack.splice(idx + 1);
+      renderBreadcrumb();
+      const { id } = stack[stack.length - 1];
+      htmx.ajax('GET', `/api/dirs/${id}`, { target: '#dir-tbody', swap: 'innerHTML' });
+      setActiveSort('dir-table', 'bytes', false);
     }
 
-    function jumpTo(ctx, idx) {
-      stacks[ctx] = stacks[ctx].slice(0, idx + 1);
-      renderBreadcrumb(ctx);
-      const { id }  = stacks[ctx][stacks[ctx].length - 1];
-      const tbodyId = ctx === 'user' ? 'user-dir-tbody' : 'dir-tbody';
-      const tableId = ctx === 'user' ? 'user-dir-table' : 'dir-table';
-      const uid     = ctx === 'user'
-        ? document.getElementById('user-dir-tbody').dataset.uid
-        : null;
-      const url = uid ? userDirUrl(uid, id) : `/api/dirs/${id}`;
-      htmx.ajax('GET', url, { target: '#' + tbodyId, swap: 'innerHTML' });
-      setActiveSort(tableId, 'bytes', false);
-    }
-
-    function goUp(ctx) {
-      if (stacks[ctx].length > 1) jumpTo(ctx, stacks[ctx].length - 2);
-    }
-
-    // ── User detail ──────────────────────────────────────────────────────────
-    function closeUserDetail() {
-      const section = document.getElementById('user-detail-section');
-      section.style.opacity = '0';
-      setTimeout(() => { section.style.display = 'none'; }, 250);
-      document.querySelectorAll('#users-tbody tr.selected').forEach(r => r.classList.remove('selected'));
-      selectedUid = null;
-    }
-
-    function loadUserDetail(uid, name, rowEl) {
-      selectedUid = uid;
-      document.querySelectorAll('#users-tbody tr.selected').forEach(r => r.classList.remove('selected'));
-      rowEl.classList.add('selected');
-      document.getElementById('user-dir-tbody').dataset.uid = uid;
-      document.getElementById('user-detail-heading').textContent = name + ' — by filesystem';
-      stacks.user = [{ id: 'tree', name: 'recent dirs' }];
-      renderBreadcrumb('user');
-      setActiveSort('user-dir-table', 'bytes', false);
-      htmx.ajax('GET', `/api/users/${uid}/detail`, { target: '#user-breakdown-tbody', swap: 'innerHTML' });
-      htmx.ajax('GET', `/api/users/${uid}/tree`,   { target: '#user-dir-tbody',       swap: 'innerHTML' });
-      const section = document.getElementById('user-detail-section');
-      section.style.display = 'grid';
-      requestAnimationFrame(() => requestAnimationFrame(() => { section.style.opacity = '1'; }));
+    function goUp() {
+      if (stack.length > 1) jumpTo(stack.length - 2);
     }
 
     // ── Click delegation ─────────────────────────────────────────────────────
     document.addEventListener('click', e => {
+      // Filesystem row → seed dir browser
       const fsRow = e.target.closest('#fs-tbody tr[data-dir-id]');
       if (fsRow) {
-        stacks.main = [];
+        stack.length = 0;
         const name = fsRow.dataset.name.split('/').filter(Boolean).pop() || fsRow.dataset.name;
-        navDir('main', fsRow.dataset.dirId, name, null);
+        navDir(fsRow.dataset.dirId, name);
         return;
       }
 
+      // Dir browser row → drill down
       const dirRow = e.target.closest('#dir-tbody tr[data-dir-id]');
       if (dirRow) {
-        navDir('main', dirRow.dataset.dirId, dirRow.dataset.name, null);
+        navDir(dirRow.dataset.dirId, dirRow.dataset.name);
         return;
       }
 
+      // User row → open mydisk page (let native <a> handle the link column)
       const userRow = e.target.closest('#users-tbody tr[data-uid]');
-      if (userRow) {
-        const uid = userRow.dataset.uid;
-        if (uid === selectedUid) {
-          closeUserDetail();
-        } else {
-          loadUserDetail(uid, userRow.dataset.name, userRow);
-        }
-        return;
-      }
-
-      const bkRow = e.target.closest('#user-breakdown-tbody tr[data-dir-id]');
-      if (bkRow) {
-        const uid  = document.getElementById('user-dir-tbody').dataset.uid;
-        stacks.user = [];
-        const name = bkRow.dataset.name.split('/').filter(Boolean).pop() || bkRow.dataset.name;
-        navDir('user', bkRow.dataset.dirId, name, uid);
-        return;
-      }
-
-      const udRow = e.target.closest('#user-dir-tbody tr[data-dir-id]');
-      if (udRow) {
-        const uid = document.getElementById('user-dir-tbody').dataset.uid;
-        navDir('user', udRow.dataset.dirId, udRow.dataset.name, uid);
+      if (userRow && !e.target.closest('a')) {
+        window.location.href = `/mydisk/${userRow.dataset.uid}`;
         return;
       }
     });
+
+    // ── Format helpers ───────────────────────────────────────────────────────
+    function fmtBytes(b) {
+      if (b >= 1_099_511_627_776) return (b / 1_099_511_627_776).toFixed(1) + ' TB';
+      if (b >= 1_073_741_824)     return (b / 1_073_741_824).toFixed(1) + ' GB';
+      if (b >= 1_048_576)         return (b / 1_048_576).toFixed(1) + ' MB';
+      return (b / 1_024).toFixed(1) + ' KB';
+    }
 
     // ── Staleness chart ──────────────────────────────────────────────────────
     function buildChart(canvasId, points) {
@@ -593,34 +510,35 @@
         data: {
           labels: points.map(p => p.label),
           datasets: [{
-              data: points.map(p => p.total_bytes/1_073_741_824),
-              backgroundColor: 'rgba(88,166,255,0.35)',
-              borderColor:     'rgba(88,166,255,0.7)',
-              borderWidth: 1,
-              borderRadius: 2,
+            data:            points.map(p => p.total_bytes / 1_073_741_824),
+            backgroundColor: 'rgba(88,166,255,0.35)',
+            borderColor:     'rgba(88,166,255,0.7)',
+            borderWidth: 1,
+            borderRadius: 2,
           }],
         },
-          options: {
-              responsive: true,
-              maintainAspectRatio: false,
-              plugins: {
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
             legend: { display: false },
             tooltip: {
               callbacks: {
                 label: ctx => {
-                  const p = points[ctx.dataIndex];
+                  const p  = points[ctx.dataIndex];
                   const gb = (p.total_bytes / 1_073_741_824).toFixed(1);
-                  return `${ctx.parsed.y.toLocaleString()} files · ${gb} GB`;
+                  return `${gb} GB · ${p.file_count.toLocaleString()} files`;
                 },
               },
             },
           },
-            scales: {
+          scales: {
             x: {
               ticks: { color: '#6b7685', font: { family: 'monospace', size: 10 }, maxRotation: 45 },
               grid:  { color: 'rgba(48,54,61,0.5)' },
             },
             y: {
+              title: { display: true, text: 'GB', color: '#6b7685', font: { family: 'monospace', size: 10 } },
               ticks: { color: '#6b7685', font: { family: 'monospace', size: 10 } },
               grid:  { color: 'rgba(48,54,61,0.5)' },
             },
@@ -633,12 +551,14 @@
       .then(r => r.json())
       .then(data => buildChart('staleness-chart', data));
 
+    fetch('/api/last_crawled')
+      .then(r => r.text())
+      .then(t => { if (t) document.getElementById('title-crawled').textContent = t.replace('data as of ', ''); });
+
     // ── Init ─────────────────────────────────────────────────────────────────
-    attachSort('fs-table',             'fs-tbody',             'bytes', false);
-    attachSort('dir-table',            'dir-tbody',            'bytes', false);
-    attachSort('users-table',          'users-tbody',          'bytes', false);
-    attachSort('user-breakdown-table', 'user-breakdown-tbody', 'bytes', false);
-    attachSort('user-dir-table',       'user-dir-tbody',       'bytes', false);
+    attachSort('fs-table',    'fs-tbody',    'bytes', false);
+    attachSort('dir-table',   'dir-tbody',   'bytes', false);
+    attachSort('users-table', 'users-tbody', 'bytes', false);
   </script>
 </body>
 </html>

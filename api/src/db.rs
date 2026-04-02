@@ -181,6 +181,14 @@ fn bucket_label(dt: &chrono::DateTime<chrono::Utc>) -> String {
     format!("{} Q{}", dt.year(), q)
 }
 
+pub async fn get_last_crawled(pool: &PgPool) -> Result<Option<chrono::DateTime<chrono::Utc>>, sqlx::Error> {
+    sqlx::query_scalar::<_, Option<chrono::DateTime<chrono::Utc>>>(
+        "SELECT MAX(finished_at) FROM crawl_runs"
+    )
+    .fetch_one(pool)
+    .await
+}
+
 pub async fn get_staleness(pool: &PgPool) -> Result<Vec<StalenessPoint>, sqlx::Error> {
     let rows = sqlx::query_as::<_, StalenessRaw>(
         "SELECT date_trunc('quarter', atime) AS bucket,

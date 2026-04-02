@@ -1,537 +1,557 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>mydisk — fscrawler</title>
-  <script src="https://unpkg.com/htmx.org@2.0.4"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
-  <style>
-    :root {
-      --bg:      #0f1117;
-      --surface: #161b22;
-      --border:  #30363d;
-      --border2: #21262d;
-      --text:    #c9d1d9;
-      --dim:     #6b7685;
-      --accent:  #58a6ff;
-      --num:     #79c0ff;
-      --bar-bg:  rgba(88, 166, 255, 0.1);
-      --hover:   #1f2937;
-      --error:   #f85149;
-    }
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>mydisk — fscrawler</title>
+        <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+        <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+        <style>
+         :root {
+             --bg:      #0f1117;
+             --surface: #161b22;
+             --border:  #30363d;
+             --border2: #21262d;
+             --text:    #c9d1d9;
+             --dim:     #6b7685;
+             --accent:  #58a6ff;
+             --num:     #79c0ff;
+             --bar-bg:  rgba(88, 166, 255, 0.1);
+             --hover:   #1f2937;
+             --error:   #f85149;
+         }
 
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-    body {
-      font-family: ui-monospace, "Cascadia Code", "Source Code Pro", monospace;
-      font-size: 13px;
-      background: var(--bg);
-      color: var(--text);
-      padding: 1.25rem;
-      display: flex;
-      flex-direction: column;
-      gap: 1.25rem;
-    }
+         body {
+             font-family: ui-monospace, "Cascadia Code", "Source Code Pro", monospace;
+             font-size: 13px;
+             background: var(--bg);
+             color: var(--text);
+             padding: 1.25rem;
+             display: flex;
+             flex-direction: column;
+             gap: 1.25rem;
+         }
 
-    /* ── Header / title bar ── */
-    .title-bar {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 1rem 1.25rem;
-      display: flex;
-      align-items: baseline;
-      gap: 2rem;
-      flex-wrap: wrap;
-    }
-    .title-bar h1 { font-size: 1.1rem; color: var(--accent); }
-    .title-bar h1 .subtitle { color: var(--dim); font-weight: normal; }
-    .title-stat { display: flex; flex-direction: column; gap: 0.1rem; }
-    .title-stat .stat-val { color: var(--num); font-size: 1rem; }
-    .title-stat .stat-lbl { color: var(--dim); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; }
-    .back-link {
-      margin-left: auto;
-      color: var(--dim);
-      text-decoration: none;
-      font-size: 0.8rem;
-    }
-    .back-link:hover { color: var(--accent); }
+         /* ── Header / title bar ── */
+         .title-bar {
+             background: var(--surface);
+             border: 1px solid var(--border);
+             border-radius: 6px;
+             padding: 1rem 1.25rem;
+             display: grid;
+             grid-template-columns: 520px 1fr;
+             gap: 1.25rem;
+             align-items: center;
+         }
+         .title-identity h1 { font-size: 1.1rem; color: var(--accent); }
+         .title-uid { color: var(--dim); font-weight: normal; }
+         .title-sub { color: var(--dim); font-size: 0.8rem; margin-top: 0.3rem; }
+         .title-stats { display: flex; align-items: flex-start; gap: 2rem; }
+         .title-stat { display: flex; flex-direction: column; gap: 0.1rem; }
+         .title-stat .stat-val { color: var(--num); font-size: 1rem; }
+         .title-stat .stat-lbl { color: var(--dim); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; }
+         .back-link {
+             margin-left: auto;
+             color: var(--dim);
+             text-decoration: none;
+             font-size: 0.8rem;
+         }
+         .back-link:hover { color: var(--accent); }
 
-    /* ── Section headings ── */
-    h2 {
-      font-size: 0.72rem;
-      color: var(--dim);
-      text-transform: uppercase;
-      letter-spacing: 0.1em;
-      margin-bottom: 0.75rem;
-    }
+         /* ── Section headings ── */
+         h2 {
+             font-size: 0.72rem;
+             color: var(--dim);
+             text-transform: uppercase;
+             letter-spacing: 0.1em;
+             margin-bottom: 0.75rem;
+         }
 
-    /* ── Grid layout ── */
-    .explorer-grid {
-      display: grid;
-      grid-template-columns: 380px 1fr;
-      gap: 1.25rem;
-      align-items: start;
-    }
+         /* ── Grid layout ── */
+         .explorer-grid {
+             display: grid;
+             grid-template-columns: 520px 1fr;
+             gap: 1.25rem;
+             align-items: start;
+         }
 
-    /* ── Panels ── */
-    .panel {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 1rem;
-    }
+         /* ── Panels ── */
+         .panel {
+             background: var(--surface);
+             border: 1px solid var(--border);
+             border-radius: 6px;
+             padding: 1rem;
+         }
 
-    .panel-header {
-      display: flex;
-      align-items: baseline;
-      gap: 0.75rem;
-      margin-bottom: 0.75rem;
-      flex-wrap: wrap;
-    }
-    .panel-header h2 { margin-bottom: 0; }
+         .panel-header {
+             display: flex;
+             align-items: baseline;
+             gap: 0.75rem;
+             margin-bottom: 0.75rem;
+             flex-wrap: wrap;
+         }
+         .panel-header h2 { margin-bottom: 0; }
 
-    /* ── Scrollable content ── */
-    .scroll-body {
-      max-height: 45vh;
-      overflow-y: auto;
-      scrollbar-width: thin;
-      scrollbar-color: var(--border) transparent;
-    }
+         /* ── Scrollable content ── */
+         .scroll-body {
+             max-height: 45vh;
+             overflow-y: auto;
+             scrollbar-width: thin;
+             scrollbar-color: var(--border) transparent;
+         }
 
-    /* ── Tables ── */
-    table { width: 100%; border-collapse: collapse; }
+         /* ── Tables ── */
+         table { width: 100%; border-collapse: collapse; }
 
-    th {
-      color: var(--dim);
-      font-weight: normal;
-      text-align: left;
-      padding: 0.3rem 0.5rem;
-      border-bottom: 1px solid var(--border);
-      white-space: nowrap;
-      user-select: none;
-      position: sticky;
-      top: 0;
-      background: var(--surface);
-      z-index: 1;
-    }
-    th[data-col] { cursor: pointer; }
-    th[data-col]:hover { color: var(--text); }
-    th.sort-desc::after { content: ' ↓'; color: var(--accent); }
-    th.sort-asc::after  { content: ' ↑'; color: var(--accent); }
+         th {
+             color: var(--dim);
+             font-weight: normal;
+             text-align: left;
+             padding: 0.3rem 0.5rem;
+             border-bottom: 1px solid var(--border);
+             white-space: nowrap;
+             user-select: none;
+             position: sticky;
+             top: 0;
+             background: var(--surface);
+             z-index: 1;
+         }
+         th[data-col] { cursor: pointer; }
+         th[data-col]:hover { color: var(--text); }
+         th.sort-desc::after { content: ' ↓'; color: var(--accent); }
+         th.sort-asc::after  { content: ' ↑'; color: var(--accent); }
 
-    td {
-      padding: 0.3rem 0.5rem;
-      border-bottom: 1px solid var(--border2);
-      vertical-align: middle;
-    }
-    td.num   { text-align: right; color: var(--num); white-space: nowrap; }
-    td.dim   { color: var(--dim); white-space: nowrap; }
-    td.error { color: var(--error); }
-    td.hint  { color: var(--dim); font-style: italic; }
+         td {
+             padding: 0.3rem 0.5rem;
+             border-bottom: 1px solid var(--border2);
+             vertical-align: middle;
+         }
+         td.num   { text-align: right; color: var(--num); white-space: nowrap; }
+         td.dim   { color: var(--dim); white-space: nowrap; }
+         td.error { color: var(--error); }
+         td.hint  { color: var(--dim); font-style: italic; }
 
-    tr.clickable { cursor: pointer; }
-    tr.clickable:hover td { background: var(--hover); }
-    tr.selected   td      { background: rgba(255, 120, 50, 0.12); }
+         tr.clickable { cursor: pointer; }
+         tr.clickable:hover td { background: var(--hover); }
+         tr.selected   td      { background: rgba(255, 120, 50, 0.12); }
 
-    /* ── Size bars ── */
-    .bar-wrap { display: none; }
+         /* ── Size bars ── */
+         .bar-wrap { display: none; }
 
-    tr[data-bytes]:not(:hover):not(.selected) td:first-child {
-      background: linear-gradient(
-        to right,
-        var(--bar-bg) var(--bar-w, 0%),
-        transparent   var(--bar-w, 0%)
-      );
-    }
+         tr[data-bytes]:not(:hover):not(.selected) td:first-child {
+             background: linear-gradient(
+                 to right,
+                 var(--bar-bg) var(--bar-w, 0%),
+                 transparent   var(--bar-w, 0%)
+             );
+         }
 
-    /* ── Copy-path button ── */
-    .copy-btn {
-      position: absolute;
-      right: 0.25rem;
-      top: 50%;
-      transform: translateY(-50%);
-      opacity: 0;
-      transition: opacity 0.15s;
-      background: none;
-      border: none;
-      cursor: pointer;
-      color: var(--dim);
-      font-size: 0.8rem;
-      padding: 0.1rem 0.2rem;
-      line-height: 1;
-    }
-    tr:hover .copy-btn { opacity: 1; }
-    .copy-btn:hover    { color: var(--accent); }
-    .copy-btn.copied   { color: #3fb950; opacity: 1; }
+         /* ── Copy-path button ── */
+         .copy-btn {
+             position: absolute;
+             right: 0.25rem;
+             top: 50%;
+             transform: translateY(-50%);
+             opacity: 0;
+             transition: opacity 0.15s;
+             background: none;
+             border: none;
+             cursor: pointer;
+             color: var(--dim);
+             font-size: 0.8rem;
+             padding: 0.1rem 0.2rem;
+             line-height: 1;
+         }
+         tr:hover .copy-btn { opacity: 1; }
+         .copy-btn:hover    { color: var(--accent); }
+         .copy-btn.copied   { color: #3fb950; opacity: 1; }
 
-    /* ── Left-truncated paths ── */
-    .cell-path {
-      max-width: 400px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      direction: rtl;
-      text-align: left;
-    }
+         /* ── Left-truncated paths ── */
+         .cell-path {
+             max-width: 400px;
+             overflow: hidden;
+             text-overflow: ellipsis;
+             white-space: nowrap;
+             direction: rtl;
+             text-align: left;
+         }
 
-    /* ── Breadcrumb ── */
-    .breadcrumb {
-      display: flex;
-      align-items: center;
-      gap: 0.2rem;
-      font-size: 0.8rem;
-      flex-wrap: wrap;
-    }
-    .bc-up, .bc-seg {
-      background: none;
-      border: none;
-      color: var(--accent);
-      cursor: pointer;
-      font: inherit;
-      font-size: 0.8rem;
-      padding: 0 0.1rem;
-    }
-    .bc-up:hover, .bc-seg:hover { text-decoration: underline; }
-    .bc-sep { color: var(--border); }
-    .bc-cur { color: var(--text); }
+         /* ── Breadcrumb ── */
+         .breadcrumb {
+             display: flex;
+             align-items: center;
+             gap: 0.2rem;
+             font-size: 0.8rem;
+             flex-wrap: wrap;
+         }
+         .bc-up, .bc-seg {
+             background: none;
+             border: none;
+             color: var(--accent);
+             cursor: pointer;
+             font: inherit;
+             font-size: 0.8rem;
+             padding: 0 0.1rem;
+         }
+         .bc-up:hover, .bc-seg:hover { text-decoration: underline; }
+         .bc-sep { color: var(--border); }
+         .bc-cur { color: var(--text); }
 
-    /* ── Staleness chart ── */
-    .chart-wrap {
-      margin-top: 0.75rem;
-      border-top: 1px solid var(--border2);
-      padding-top: 0.5rem;
-    }
-    .chart-label {
-      font-size: 0.68rem;
-      color: var(--dim);
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      margin-bottom: 0.3rem;
-    }
-  </style>
-</head>
-<body>
+         /* ── Staleness chart ── */
+         .chart-wrap {
+             margin-top: 0.75rem;
+             border-top: 1px solid var(--border2);
+             padding-top: 0.5rem;
+         }
+         .chart-label {
+             font-size: 0.68rem;
+             color: var(--dim);
+             text-transform: uppercase;
+             letter-spacing: 0.08em;
+             margin-bottom: 0.3rem;
+         }
+        </style>
+    </head>
+    <body>
 
-  <!-- ── Title bar ── -->
-  <div class="title-bar" id="title-bar">
-    <h1 id="title-username">— <span class="subtitle">// mydisk</span></h1>
-    <div class="title-stat">
-      <span class="stat-val" id="title-size">—</span>
-      <span class="stat-lbl">total size</span>
-    </div>
-    <div class="title-stat">
-      <span class="stat-val" id="title-files">—</span>
-      <span class="stat-lbl">files</span>
-    </div>
-    <div class="title-stat">
-      <span class="stat-val" id="title-login">—</span>
-      <span class="stat-lbl">last login</span>
-    </div>
-    <a class="back-link" href="/">← all users</a>
-  </div>
+        <!-- ── Title bar ── -->
+        <div class="title-bar" id="title-bar">
+            <div class="title-identity">
+                <h1><span class="title-uid" id="title-uid">—</span> // <span id="title-username">—</span></h1>
+                <p class="title-sub" id="title-sub">—</p>
+            </div>
+            <div class="title-stats">
+                <div class="title-stat">
+                    <span class="stat-val" id="title-size">—</span>
+                    <span class="stat-lbl">total size</span>
+                </div>
+                <div class="title-stat">
+                    <span class="stat-val" id="title-files">—</span>
+                    <span class="stat-lbl">files</span>
+                </div>
+                <div class="title-stat">
+                    <span class="stat-val" id="title-login">—</span>
+                    <span class="stat-lbl">last login</span>
+                </div>
+                <a class="back-link" href="/">← all users</a>
+            </div>
+        </div>
 
-  <!-- ── Filesystem breakdown + user dir browser ── -->
-  <div class="explorer-grid">
+        <!-- ── Filesystem breakdown + user dir browser ── -->
+        <div class="explorer-grid">
 
-    <div class="panel">
-      <h2>By filesystem</h2>
-      <div class="scroll-body">
-        <table id="fs-breakdown-table">
-          <thead>
-            <tr>
-              <th data-col="name">Filesystem</th>
-              <th data-col="bytes">Size</th>
-              <th data-col="files">Files</th>
-            </tr>
-          </thead>
-          <tbody id="fs-breakdown-tbody">
-            <tr><td colspan="3" class="hint">loading…</td></tr>
-          </tbody>
-        </table>
-      </div>
-      <div class="chart-wrap">
-        <p class="chart-label">file age (last access)</p>
-        <canvas id="staleness-chart" height="110"></canvas>
-      </div>
-    </div>
+            <div class="panel">
+                <h2>By filesystem</h2>
+                <div class="scroll-body">
+                    <table id="fs-breakdown-table">
+                        <thead>
+                            <tr>
+                                <th data-col="name">Filesystem</th>
+                                <th data-col="bytes">Size</th>
+                                <th data-col="files">Files</th>
+                            </tr>
+                        </thead>
+                        <tbody id="fs-breakdown-tbody">
+                            <tr><td colspan="3" class="hint">loading…</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="chart-wrap">
+                    <p class="chart-label">file age (last access)</p>
+                    <div><canvas id="staleness-chart" height="325" max-height="325"></canvas></div>
+                </div>
+            </div>
 
-    <div class="panel">
-      <div class="panel-header">
-        <h2>Directories</h2>
-        <nav id="dir-breadcrumb" class="breadcrumb"></nav>
-      </div>
-      <div class="scroll-body">
-        <table id="dir-table">
-          <thead>
-            <tr>
-              <th data-col="name">Path</th>
-              <th data-col="bytes">Size</th>
-              <th data-col="files">Files</th>
-              <th data-col="mtime">Modified</th>
-            </tr>
-          </thead>
-          <tbody id="dir-tbody" data-uid="">
-            <tr><td colspan="4" class="hint">loading…</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
+            <div class="panel">
+                <div class="panel-header">
+                    <h2>Directories</h2>
+                    <nav id="dir-breadcrumb" class="breadcrumb"></nav>
+                </div>
+                <div class="scroll-body">
+                    <table id="dir-table">
+                        <thead>
+                            <tr>
+                                <th data-col="name">Path</th>
+                                <th data-col="bytes">Size</th>
+                                <th data-col="files">Files</th>
+                                <th data-col="mtime">Modified</th>
+                            </tr>
+                        </thead>
+                        <tbody id="dir-tbody" data-uid="">
+                            <tr><td colspan="4" class="hint">← click a filesystem to browse directories</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
 
-  </div>
+        </div>
 
-  <script>
-    // ── UID from URL ──────────────────────────────────────────────────────────
-    const uid = window.location.pathname.split('/').filter(Boolean).pop();
+        <script>
+         // ── UID from URL ──────────────────────────────────────────────────────────
+         const uid = window.location.pathname.split('/').filter(Boolean).pop();
 
-    // ── Sorting ──────────────────────────────────────────────────────────────
-    const sortState = {};
+         // ── Sorting ──────────────────────────────────────────────────────────────
+         const sortState = {};
 
-    function getSortVal(row, col) {
-      if (col === 'bytes') return Number(row.dataset.bytes || 0);
-      if (col === 'files') return Number(row.dataset.files || 0);
-      if (col === 'mtime') return row.dataset.mtime || '';
-      return (row.dataset.name || '').toLowerCase();
-    }
+         function getSortVal(row, col) {
+             if (col === 'bytes') return Number(row.dataset.bytes || 0);
+             if (col === 'files') return Number(row.dataset.files || 0);
+             if (col === 'mtime') {
+                 const v = row.dataset.mtime || '';
+                 return v === '—' ? '' : v;  // nulls sort to end when descending
+             }
+             return (row.dataset.name || '').toLowerCase();
+         }
 
-    function sortTbody(tbodyId, col, asc) {
-      const tbody = document.getElementById(tbodyId);
-      if (!tbody) return;
-      const rows = [...tbody.querySelectorAll('tr[data-bytes]')];
-      rows.sort((a, b) => {
-        const av = getSortVal(a, col), bv = getSortVal(b, col);
-        const cmp = typeof av === 'number' ? av - bv : av.localeCompare(bv);
-        return asc ? cmp : -cmp;
-      });
-      rows.forEach(r => tbody.appendChild(r));
-    }
+         function sortTbody(tbodyId, col, asc) {
+             const tbody = document.getElementById(tbodyId);
+             if (!tbody) return;
+             const rows = [...tbody.querySelectorAll('tr[data-bytes]')];
+             rows.sort((a, b) => {
+                 const av = getSortVal(a, col), bv = getSortVal(b, col);
+                 const cmp = typeof av === 'number' ? av - bv : av.localeCompare(bv);
+                 return asc ? cmp : -cmp;
+             });
+             rows.forEach(r => tbody.appendChild(r));
+         }
 
-    function setActiveSort(tableId, col, asc) {
-      const table = document.getElementById(tableId);
-      if (!table) return;
-      table.querySelectorAll('th[data-col]').forEach(th => {
-        th.classList.remove('sort-asc', 'sort-desc');
-        if (th.dataset.col === col) th.classList.add(asc ? 'sort-asc' : 'sort-desc');
-      });
-      const tbody = table.querySelector('tbody');
-      if (tbody) sortState[tbody.id] = { col, asc };
-    }
+         function setActiveSort(tableId, col, asc) {
+             const table = document.getElementById(tableId);
+             if (!table) return;
+             table.querySelectorAll('th[data-col]').forEach(th => {
+                 th.classList.remove('sort-asc', 'sort-desc');
+                 if (th.dataset.col === col) th.classList.add(asc ? 'sort-asc' : 'sort-desc');
+             });
+             const tbody = table.querySelector('tbody');
+             if (tbody) sortState[tbody.id] = { col, asc };
+         }
 
-    function attachSort(tableId, tbodyId, defaultCol, defaultAsc) {
-      const table = document.getElementById(tableId);
-      if (!table) return;
-      sortState[tbodyId] = { col: defaultCol, asc: defaultAsc };
-      setActiveSort(tableId, defaultCol, defaultAsc);
-      table.querySelectorAll('thead th[data-col]').forEach(th => {
-        th.addEventListener('click', () => {
-          const st  = sortState[tbodyId];
-          const col = th.dataset.col;
-          const asc = col === st.col ? !st.asc : (col === 'name' || col === 'mtime');
-          sortState[tbodyId] = { col, asc };
-          sortTbody(tbodyId, col, asc);
-          setActiveSort(tableId, col, asc);
-        });
-      });
-    }
+         function attachSort(tableId, tbodyId, defaultCol, defaultAsc) {
+             const table = document.getElementById(tableId);
+             if (!table) return;
+             sortState[tbodyId] = { col: defaultCol, asc: defaultAsc };
+             setActiveSort(tableId, defaultCol, defaultAsc);
+             table.querySelectorAll('thead th[data-col]').forEach(th => {
+                 th.addEventListener('click', () => {
+                     const st  = sortState[tbodyId];
+                     const col = th.dataset.col;
+                     const asc = col === st.col ? !st.asc : (col === 'name' || col === 'mtime');
+                     sortState[tbodyId] = { col, asc };
+                     sortTbody(tbodyId, col, asc);
+                     setActiveSort(tableId, col, asc);
+                 });
+             });
+         }
 
-    // ── Size bars ────────────────────────────────────────────────────────────
-    function updateBars(tbodyId) {
-      const tbody = document.getElementById(tbodyId);
-      if (!tbody) return;
-      const rows = [...tbody.querySelectorAll('tr[data-bytes]')];
-      const max  = Math.max(0, ...rows.map(r => Number(r.dataset.bytes)));
-      rows.forEach(r => {
-        const pct = max ? (Number(r.dataset.bytes) / max * 100).toFixed(1) + '%' : '0%';
-        r.style.setProperty('--bar-w', pct);
-      });
-    }
+         // ── Size bars ────────────────────────────────────────────────────────────
+         function updateBars(tbodyId) {
+             const tbody = document.getElementById(tbodyId);
+             if (!tbody) return;
+             const rows = [...tbody.querySelectorAll('tr[data-bytes]')];
+             const max  = Math.max(0, ...rows.map(r => Number(r.dataset.bytes)));
+             rows.forEach(r => {
+                 const pct = max ? (Number(r.dataset.bytes) / max * 100).toFixed(1) + '%' : '0%';
+                 r.style.setProperty('--bar-w', pct);
+             });
+         }
 
-    // ── Copy-path buttons ────────────────────────────────────────────────────
-    function addCopyButtons(tbodyId) {
-      const tbody = document.getElementById(tbodyId);
-      if (!tbody) return;
-      tbody.querySelectorAll('tr[data-path]').forEach(row => {
-        if (row.querySelector('.copy-btn')) return;
-        const td = row.querySelector('td');
-        if (!td) return;
-        td.style.position = 'relative';
-        const btn = document.createElement('button');
-        btn.className   = 'copy-btn';
-        btn.title       = 'Copy path';
-        btn.textContent = '⎘';
-        btn.addEventListener('click', e => {
-          e.stopPropagation();
-          navigator.clipboard.writeText(row.dataset.path).then(() => {
-            btn.textContent = '✓';
-            btn.classList.add('copied');
-            setTimeout(() => { btn.textContent = '⎘'; btn.classList.remove('copied'); }, 1500);
-          });
-        });
-        td.appendChild(btn);
-      });
-    }
+         // ── Copy-path buttons ────────────────────────────────────────────────────
+         function addCopyButtons(tbodyId) {
+             const tbody = document.getElementById(tbodyId);
+             if (!tbody) return;
+             tbody.querySelectorAll('tr[data-path]').forEach(row => {
+                 if (row.querySelector('.copy-btn')) return;
+                 const td = row.querySelector('td');
+                 if (!td) return;
+                 td.style.position = 'relative';
+                 const btn = document.createElement('button');
+                 btn.className   = 'copy-btn';
+                 btn.title       = 'Copy path';
+                 btn.textContent = '⎘';
+                 btn.addEventListener('click', e => {
+                     e.stopPropagation();
+                     navigator.clipboard.writeText(row.dataset.path).then(() => {
+                         btn.textContent = '✓';
+                         btn.classList.add('copied');
+                         setTimeout(() => { btn.textContent = '⎘'; btn.classList.remove('copied'); }, 1500);
+                     });
+                 });
+                 td.appendChild(btn);
+             });
+         }
 
-    // ── After htmx settles ───────────────────────────────────────────────────
-    document.addEventListener('htmx:afterSettle', e => {
-      const id = e.detail.target?.id;
-      if (!id) return;
-      updateBars(id);
-      const st = sortState[id];
-      if (st) sortTbody(id, st.col, st.asc);
-      if (id === 'dir-tbody') {
-        addCopyButtons(id);
-        const tbody = document.getElementById(id);
-        if (tbody && tbody.querySelectorAll('tr[data-bytes]').length === 0) {
-          tbody.innerHTML = '<tr><td colspan="4" class="hint">no subdirectories</td></tr>';
-        }
-      }
-    });
+         // ── After htmx settles ───────────────────────────────────────────────────
+         document.addEventListener('htmx:afterSettle', e => {
+             const id = e.detail.target?.id;
+             if (!id) return;
+             updateBars(id);
+             const st = sortState[id];
+             if (st) sortTbody(id, st.col, st.asc);
+             if (id === 'dir-tbody') {
+                 addCopyButtons(id);
+                 const tbody = document.getElementById(id);
+                 if (tbody && tbody.querySelectorAll('tr[data-bytes]').length === 0) {
+                     tbody.innerHTML = '<tr><td colspan="4" class="hint">no subdirectories</td></tr>';
+                 }
+             }
+         });
 
-    // ── Breadcrumb ───────────────────────────────────────────────────────────
-    let stack = [];
+         // ── Breadcrumb ───────────────────────────────────────────────────────────
+         let stack = [];
 
-    function renderBreadcrumb() {
-      const bc = document.getElementById('dir-breadcrumb');
-      if (!bc) return;
-      let html = '';
-      if (stack.length > 1) html += `<button class="bc-up" onclick="goUp()">↑</button>`;
-      stack.forEach((seg, i) => {
-        if (i > 0) html += '<span class="bc-sep">/</span>';
-        if (i < stack.length - 1) {
-          html += `<button class="bc-seg" onclick="jumpTo(${i})">${seg.name}</button>`;
-        } else {
-          html += `<span class="bc-cur">${seg.name}</span>`;
-        }
-      });
-      bc.innerHTML = html;
-    }
+         function renderBreadcrumb() {
+             const bc = document.getElementById('dir-breadcrumb');
+             if (!bc) return;
+             let html = '';
+             if (stack.length > 1) html += `<button class="bc-up" onclick="goUp()">↑</button>`;
+             stack.forEach((seg, i) => {
+                 if (i > 0) html += '<span class="bc-sep">/</span>';
+                 if (i < stack.length - 1) {
+                     html += `<button class="bc-seg" onclick="jumpTo(${i})">${seg.name}</button>`;
+                 } else {
+                     html += `<span class="bc-cur">${seg.name}</span>`;
+                 }
+             });
+             bc.innerHTML = html;
+         }
 
-    function userDirUrl(id) {
-      return id === 'tree'
-        ? `/api/users/${uid}/tree`
-        : `/api/users/${uid}/dirs/${id}`;
-    }
+         function userDirUrl(id) {
+             return id === 'tree'
+                  ? `/api/users/${uid}/tree`
+                  : `/api/users/${uid}/dirs/${id}`;
+         }
 
-    function navDir(id, name) {
-      stack.push({ id, name });
-      renderBreadcrumb();
-      htmx.ajax('GET', userDirUrl(id), { target: '#dir-tbody', swap: 'innerHTML' });
-      setActiveSort('dir-table', 'bytes', false);
-    }
+         function navDir(id, name) {
+             stack.push({ id, name });
+             renderBreadcrumb();
+             htmx.ajax('GET', userDirUrl(id), { target: '#dir-tbody', swap: 'innerHTML' });
+             setActiveSort('dir-table', 'bytes', false);
+         }
 
-    function jumpTo(idx) {
-      stack = stack.slice(0, idx + 1);
-      renderBreadcrumb();
-      const { id } = stack[stack.length - 1];
-      htmx.ajax('GET', userDirUrl(id), { target: '#dir-tbody', swap: 'innerHTML' });
-      setActiveSort('dir-table', 'bytes', false);
-    }
+         function jumpTo(idx) {
+             stack = stack.slice(0, idx + 1);
+             renderBreadcrumb();
+             const { id } = stack[stack.length - 1];
+             htmx.ajax('GET', userDirUrl(id), { target: '#dir-tbody', swap: 'innerHTML' });
+             setActiveSort('dir-table', 'bytes', false);
+         }
 
-    function goUp() {
-      if (stack.length > 1) jumpTo(stack.length - 2);
-    }
+         function goUp() {
+             if (stack.length > 1) jumpTo(stack.length - 2);
+         }
 
-    // ── Click delegation ─────────────────────────────────────────────────────
-    document.addEventListener('click', e => {
-      const fsRow = e.target.closest('#fs-breakdown-tbody tr[data-dir-id]');
-      if (fsRow) {
-        stack = [];
-        const name = fsRow.dataset.name.split('/').filter(Boolean).pop() || fsRow.dataset.name;
-        navDir(fsRow.dataset.dirId, name);
-        return;
-      }
+         // ── Click delegation ─────────────────────────────────────────────────────
+         document.addEventListener('click', e => {
+             const fsRow = e.target.closest('#fs-breakdown-tbody tr[data-dir-id]');
+             if (fsRow) {
+                 stack = [];
+                 const name = fsRow.dataset.name.split('/').filter(Boolean).pop() || fsRow.dataset.name;
+                 navDir(fsRow.dataset.dirId, name);
+                 return;
+             }
 
-      const dirRow = e.target.closest('#dir-tbody tr[data-dir-id]');
-      if (dirRow) {
-        navDir(dirRow.dataset.dirId, dirRow.dataset.name);
-        return;
-      }
-    });
+             const dirRow = e.target.closest('#dir-tbody tr[data-dir-id]');
+             if (dirRow) {
+                 navDir(dirRow.dataset.dirId, dirRow.dataset.name);
+                 return;
+             }
+         });
 
-    // ── Staleness chart ──────────────────────────────────────────────────────
-    function buildChart(canvasId, points) {
-      const canvas = document.getElementById(canvasId);
-      if (!canvas) return;
-      const existing = Chart.getChart(canvas);
-      if (existing) existing.destroy();
-      new Chart(canvas, {
-        type: 'bar',
-        data: {
-          labels: points.map(p => p.label),
-          datasets: [{
-            data: points.map(p => p.file_count),
-            backgroundColor: 'rgba(88,166,255,0.35)',
-            borderColor:     'rgba(88,166,255,0.7)',
-            borderWidth: 1,
-            borderRadius: 2,
-          }],
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: { display: false },
-            tooltip: {
-              callbacks: {
-                label: ctx => {
-                  const p = points[ctx.dataIndex];
-                  const gb = (p.total_bytes / 1_073_741_824).toFixed(1);
-                  return `${ctx.parsed.y.toLocaleString()} files · ${gb} GB`;
-                },
-              },
-            },
-          },
-          scales: {
-            x: {
-              ticks: { color: '#6b7685', font: { family: 'monospace', size: 10 }, maxRotation: 45 },
-              grid:  { color: 'rgba(48,54,61,0.5)' },
-            },
-            y: {
-              ticks: { color: '#6b7685', font: { family: 'monospace', size: 10 } },
-              grid:  { color: 'rgba(48,54,61,0.5)' },
-            },
-          },
-        },
-      });
-    }
+         // ── Staleness chart ──────────────────────────────────────────────────────
+         function buildChart(canvasId, points) {
+             const canvas = document.getElementById(canvasId);
+             if (!canvas) return;
+             const existing = Chart.getChart(canvas);
+             if (existing) existing.destroy();
+             new Chart(canvas, {
+                 type: 'bar',
+                 data: {
+                     labels: points.map(p => p.label),
+                     datasets: [{
+                         data: points.map(p => (p.total_bytes / 1_073_741_824)),
+                         backgroundColor: 'rgba(88,166,255,0.35)',
+                         borderColor:     'rgba(88,166,255,0.7)',
+                         borderWidth: 1,
+                         borderRadius: 2,
+                     }],
+                 },
+                 options: {
+                     responsive: true,
+                     maintainAspectRatio: false,
+                     plugins: {
+                         legend: { display: false },
+                         tooltip: {
+                             callbacks: {
+                                 label: ctx => {
+                                     const p = points[ctx.dataIndex];
+                                     const gb = (p.total_bytes / 1_073_741_824).toFixed(1);
+                                     return `${p.file_count} files · ${gb} GB`;
+                                 },
+                             },
+                         },
+                     },
+                     scales: {
+                         x: {
+                             ticks: { color: '#6b7685', font: { family: 'monospace', size: 10 }, maxRotation: 45 },
+                             grid:  { color: 'rgba(48,54,61,0.5)' },
+                         },
+                         y: {
+                             ticks: { color: '#6b7685', font: { family: 'monospace', size: 10 } },
+                             grid:  { color: 'rgba(48,54,61,0.5)' },
+                         },
+                     },
+                 },
+             });
+         }
 
-    // ── Format helpers ───────────────────────────────────────────────────────
-    function fmtBytes(b) {
-      if (b >= 1_073_741_824) return (b / 1_073_741_824).toFixed(1) + ' GB';
-      if (b >= 1_048_576)     return (b / 1_048_576).toFixed(1) + ' MB';
-      if (b >= 1_024)         return (b / 1_024).toFixed(1) + ' KB';
-      return b + ' B';
-    }
+         // ── Format helpers ───────────────────────────────────────────────────────
+         function fmtBytes(b) {
+             if (b >= 1_073_741_824) return (b / 1_073_741_824).toFixed(1) + ' GB';
+             if (b >= 1_048_576)     return (b / 1_048_576).toFixed(1) + ' MB';
+             if (b >= 1_024)         return (b / 1_024).toFixed(1) + ' KB';
+             return b + ' B';
+         }
 
-    // ── Page init ────────────────────────────────────────────────────────────
-    attachSort('fs-breakdown-table', 'fs-breakdown-tbody', 'bytes', false);
-    attachSort('dir-table',          'dir-tbody',          'mtime', true);
+         // ── Page init ────────────────────────────────────────────────────────────
+         attachSort('fs-breakdown-table', 'fs-breakdown-tbody', 'bytes', false);
+         attachSort('dir-table',          'dir-tbody',          'mtime', false);
 
-    // Load user summary → title bar
-    fetch(`/api/users/${uid}/summary`)
-      .then(r => r.json())
-      .then(d => {
-        if (!d) return;
-        document.getElementById('title-username').innerHTML =
-          d.display_name + ' <span class="subtitle">// mydisk</span>';
-        document.title = d.display_name + ' — mydisk';
-        document.getElementById('title-size').textContent  = fmtBytes(d.total_bytes);
-        document.getElementById('title-files').textContent = d.file_count.toLocaleString();
-      });
+         // UID is known immediately from URL — fill it in without waiting for fetch
+         const subtitles = [
+             "it's not hoarding if it's science",
+             "have you considered deleting something",
+             "storage: it's personal",
+             "disk space accountability corner",
+         ];
+         document.getElementById('title-uid').textContent = uid;
+         document.getElementById('title-sub').textContent =
+             subtitles[Math.floor(Math.random() * subtitles.length)];
 
-    // Load filesystem breakdown
-    htmx.ajax('GET', `/api/users/${uid}/detail`, { target: '#fs-breakdown-tbody', swap: 'innerHTML' });
+         // Load user summary → title bar
+         fetch(`/api/users/${uid}/summary`)
+             .then(r => r.json())
+             .then(d => {
+                 if (!d) return;
+                 document.getElementById('title-username').textContent = d.display_name;
+                 document.title = d.display_name + ' — mydisk';
+                 document.getElementById('title-size').textContent  = fmtBytes(d.total_bytes);
+                 document.getElementById('title-files').textContent = d.file_count.toLocaleString();
+             });
 
-    // Load dir tree (initial = recent dirs)
-    stack = [{ id: 'tree', name: 'recent dirs' }];
-    renderBreadcrumb();
-    htmx.ajax('GET', `/api/users/${uid}/tree`, { target: '#dir-tbody', swap: 'innerHTML' });
+         // Load filesystem breakdown
+         htmx.ajax('GET', `/api/users/${uid}/detail`, { target: '#fs-breakdown-tbody', swap: 'innerHTML' });
 
-    // Load staleness chart
-    fetch(`/api/users/${uid}/staleness`)
-      .then(r => r.json())
-      .then(data => buildChart('staleness-chart', data));
-  </script>
-</body>
+         // Load dir tree (initial = recent dirs)
+         stack = [{ id: 'tree', name: 'recent dirs' }];
+         renderBreadcrumb();
+         htmx.ajax('GET', `/api/users/${uid}/tree`, { target: '#dir-tbody', swap: 'innerHTML' });
+
+         // Load staleness chart
+         fetch(`/api/users/${uid}/staleness`)
+             .then(r => r.json())
+             .then(data => buildChart('staleness-chart', data));
+        </script>
+    </body>
 </html>
