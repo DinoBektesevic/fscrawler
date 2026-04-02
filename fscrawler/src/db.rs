@@ -396,11 +396,14 @@ pub async fn post_crawl(pool: &PgPool) -> Result<(), WriterError> {
         .await
         .map_err(|e| WriterError::Database(e.to_string()))?;
 
+    // Add FK constraints as NOT VALID: bulk-COPYd crawl data is trusted without
+    // a full table scan, but any subsequent inserts (delta updates, manual rows)
+    // will be checked row-by-row as normal.
     sqlx::query(
         "DO $$ BEGIN
              ALTER TABLE directories
-             ADD CONSTRAINT fk_directories_owner  FOREIGN KEY (owner_uid) REFERENCES users(uid),
-             ADD CONSTRAINT fk_directories_parent FOREIGN KEY (parent_id) REFERENCES directories(dir_id);
+             ADD CONSTRAINT fk_directories_owner  FOREIGN KEY (owner_uid) REFERENCES users(uid)           NOT VALID,
+             ADD CONSTRAINT fk_directories_parent FOREIGN KEY (parent_id) REFERENCES directories(dir_id)  NOT VALID;
          EXCEPTION WHEN duplicate_object THEN NULL;
          END $$"
     )
@@ -411,8 +414,8 @@ pub async fn post_crawl(pool: &PgPool) -> Result<(), WriterError> {
     sqlx::query(
         "DO $$ BEGIN
              ALTER TABLE files
-             ADD CONSTRAINT fk_files_owner FOREIGN KEY (owner_uid) REFERENCES users(uid),
-             ADD CONSTRAINT fk_files_dir   FOREIGN KEY    (dir_id) REFERENCES directories(dir_id);
+             ADD CONSTRAINT fk_files_owner FOREIGN KEY (owner_uid) REFERENCES users(uid)          NOT VALID,
+             ADD CONSTRAINT fk_files_dir   FOREIGN KEY    (dir_id) REFERENCES directories(dir_id) NOT VALID;
          EXCEPTION WHEN duplicate_object THEN NULL;
          END $$"
     )
@@ -423,7 +426,7 @@ pub async fn post_crawl(pool: &PgPool) -> Result<(), WriterError> {
     sqlx::query(
         "DO $$ BEGIN
              ALTER TABLE directory_stats
-             ADD CONSTRAINT fk_dir_stats_owner FOREIGN KEY (dir_id) REFERENCES directories(dir_id);
+             ADD CONSTRAINT fk_dir_stats_owner FOREIGN KEY (dir_id) REFERENCES directories(dir_id) NOT VALID;
          EXCEPTION WHEN duplicate_object THEN NULL;
          END $$"
     )
