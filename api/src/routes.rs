@@ -3,6 +3,7 @@ use axum::{
     response::Html,
 };
 use sqlx::PgPool;
+use chrono_tz::America::Los_Angeles;
 
 use crate::db;
 
@@ -12,6 +13,13 @@ fn fmt_bytes(bytes: i64) -> String {
         b if b >= 1_048_576     => format!("{:.1} MB", b as f64 / 1_048_576.0),
         b if b >= 1_024         => format!("{:.1} KB", b as f64 / 1_024.0),
         b                       => format!("{} B", b),
+    }
+}
+
+fn fmt_mtime(t: &Option<chrono::DateTime<chrono::Utc>>) -> String {
+    match t {
+        Some(dt) => dt.with_timezone(&Los_Angeles).format("%Y-%m-%d %H:%M").to_string(),
+        None     => "—".to_string(),
     }
 }
 
@@ -40,18 +48,16 @@ pub async fn filesystems(State(pool): State<PgPool>) -> Html<String> {
 
     let html = rows.iter().map(|row| {
         format!(
-            r##"<tr class="clickable"
-                    hx-get="/api/dirs/{dir_id}"
-                    hx-target="#dir-view"
-                    hx-swap="innerHTML">
-                  <td>{path}</td>
-                  <td class="num">{size}</td>
-                  <td class="num">{count}</td>
-                </tr>"##,
+            r#"<tr class="clickable" data-dir-id="{dir_id}" data-bytes="{bytes}" data-files="{files}" data-name="{path}">
+                 <td>{path}</td>
+                 <td class="num"><span class="num-val">{size}</span><span class="bar-wrap"><span class="bar"></span></span></td>
+                 <td class="num">{files}</td>
+               </tr>"#,
             dir_id = row.dir_id,
             path   = row.path,
+            bytes  = row.subtree_bytes,
             size   = fmt_bytes(row.subtree_bytes),
-            count  = row.subtree_count,
+            files  = row.subtree_count,
         )
     }).collect();
 
@@ -66,18 +72,16 @@ pub async fn users(State(pool): State<PgPool>) -> Html<String> {
 
     let html = rows.iter().map(|row| {
         format!(
-            r##"<tr class="clickable"
-                    hx-get="/api/users/{uid}/detail"
-                    hx-target="#user-detail"
-                    hx-swap="innerHTML">
-                  <td>{name}</td>
-                  <td class="num">{size}</td>
-                  <td class="num">{count}</td>
-                </tr>"##,
+            r#"<tr class="clickable" data-uid="{uid}" data-bytes="{bytes}" data-files="{files}" data-name="{name}">
+                 <td>{name}</td>
+                 <td class="num"><span class="num-val">{size}</span><span class="bar-wrap"><span class="bar"></span></span></td>
+                 <td class="num">{files}</td>
+               </tr>"#,
             uid   = row.uid,
             name  = row.display_name,
+            bytes = row.total_bytes,
             size  = fmt_bytes(row.total_bytes),
-            count = row.file_count,
+            files = row.file_count,
         )
     }).collect();
 
@@ -90,28 +94,24 @@ pub async fn user_detail(
 ) -> Html<String> {
     let rows = match db::get_user_breakdown(&pool, uid).await {
         Ok(r)  => r,
-        Err(e) => return Html(format!("<p class='error'>Error: {}</p>", e)),
+        Err(e) => return Html(format!("<tr><td colspan='3' class='error'>Error: {}</td></tr>", e)),
     };
 
-    let mut html = String::from(
-        "<table>\
-           <thead><tr><th>Filesystem</th><th>Size</th><th>Files</th></tr></thead>\
-           <tbody>",
-    );
-    for row in &rows {
-        html.push_str(&format!(
-            "<tr data-dir-id={dir}>\
-               <td>{fs}</td>\
-               <td class='num'>{size}</td>\
-               <td class='num'>{count}</td>\
-             </tr>",
-            fs    = row.filesystem,
-            size  = fmt_bytes(row.bytes),
-            count = row.file_count,
-            dir   = row.dir_id,
-        ));
-    }
-    html.push_str("</tbody></table>");
+    let html = rows.iter().map(|row| {
+        format!(
+            r#"<tr class="clickable" data-dir-id="{dir_id}" data-bytes="{bytes}" data-files="{files}" data-name="{fs}">
+                 <td>{fs}</td>
+                 <td class="num"><span class="num-val">{size}</span><span class="bar-wrap"><span class="bar"></span></span></td>
+                 <td class="num">{files}</td>
+               </tr>"#,
+            dir_id = row.dir_id,
+            fs     = row.filesystem,
+            bytes  = row.bytes,
+            size   = fmt_bytes(row.bytes),
+            files  = row.file_count,
+        )
+    }).collect();
+
     Html(html)
 }
 
@@ -121,31 +121,87 @@ pub async fn dir_children(
 ) -> Html<String> {
     let rows = match db::get_dir_children(&pool, dir_id).await {
         Ok(r)  => r,
-        Err(e) => return Html(format!("<p class='error'>Error: {}</p>", e)),
+        Err(e) => return Html(format!("<tr><td colspan='3' class='error'>Error: {}</td></tr>", e)),
     };
 
-    let mut html = String::from(
-        "<table>\
-           <thead><tr><th>Directory</th><th>Size</th><th>Files</th></tr></thead>\
-           <tbody>",
-    );
-    for row in &rows {
+    let html = rows.iter().map(|row| {
         let name = row.path.split('/').next_back().unwrap_or(&row.path);
-        html.push_str(&format!(
-            r##"<tr class="clickable"
-                    hx-get="/api/dirs/{dir_id}"
-                    hx-target="#dir-view"
-                    hx-swap="innerHTML">
-                  <td>{name}</td>
-                  <td class="num">{size}</td>
-                  <td class="num">{count}</td>
-                </tr>"##,
+        format!(
+            r#"<tr class="clickable" data-dir-id="{dir_id}" data-bytes="{bytes}" data-files="{files}" data-name="{name}">
+                 <td>{name}</td>
+                 <td class="num"><span class="num-val">{size}</span><span class="bar-wrap"><span class="bar"></span></span></td>
+                 <td class="num">{files}</td>
+               </tr>"#,
             dir_id = row.dir_id,
             name   = name,
+            bytes  = row.subtree_bytes,
             size   = fmt_bytes(row.subtree_bytes),
-            count  = row.subtree_count,
-        ));
-    }
-    html.push_str("</tbody></table>");
+            files  = row.subtree_count,
+        )
+    }).collect();
+
     Html(html)
+}
+
+pub async fn user_dir_children(
+    State(pool): State<PgPool>,
+    Path((uid, dir_id)): Path<(i64, i64)>,
+) -> Html<String> {
+    let rows = match db::get_user_dir_children(&pool, dir_id, uid).await {
+        Ok(r)  => r,
+        Err(e) => return Html(format!("<tr><td colspan='4' class='error'>Error: {}</td></tr>", e)),
+    };
+
+    let html = rows.iter().map(|row| {
+        let name = row.path.split('/').next_back().unwrap_or(&row.path);
+        format!(
+            r#"<tr class="clickable" data-dir-id="{dir_id}" data-bytes="{bytes}" data-files="{files}" data-name="{name}">
+                 <td>{name}</td>
+                 <td class="num"><span class="num-val">{size}</span><span class="bar-wrap"><span class="bar"></span></span></td>
+                 <td class="num">{files}</td>
+                 <td class="dim">{mtime}</td>
+               </tr>"#,
+            dir_id = row.dir_id,
+            name   = name,
+            bytes  = row.user_bytes,
+            size   = fmt_bytes(row.user_bytes),
+            files  = row.user_files,
+            mtime  = fmt_mtime(&row.last_mtime),
+        )
+    }).collect();
+
+    Html(html)
+}
+
+pub async fn user_tree(
+    State(pool): State<PgPool>,
+    Path(uid): Path<i64>,
+) -> Html<String> {
+    let rows = match db::get_user_tree(&pool, uid).await {
+        Ok(r)  => r,
+        Err(e) => return Html(format!("<tr><td colspan='4' class='error'>Error: {}</td></tr>", e)),
+    };
+
+    let html = rows.iter().map(|row| {
+        format!(
+            r#"<tr class="clickable" data-dir-id="{dir_id}" data-bytes="{bytes}" data-files="{files}" data-name="{path}">
+                 <td class="cell-path">{path}</td>
+                 <td class="num"><span class="num-val">{size}</span><span class="bar-wrap"><span class="bar"></span></span></td>
+                 <td class="num">{files}</td>
+                 <td class="dim">{mtime}</td>
+               </tr>"#,
+            dir_id = row.dir_id,
+            path   = row.path,
+            bytes  = row.user_bytes,
+            size   = fmt_bytes(row.user_bytes),
+            files  = row.user_files,
+            mtime  = fmt_mtime(&row.last_mtime),
+        )
+    }).collect();
+
+    Html(html)
+}
+
+pub async fn mydisk_page(Path(_uid): Path<i64>) -> Html<&'static str> {
+    Html(include_str!("../static/mydisk.html"))
 }
