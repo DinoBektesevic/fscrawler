@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>fscrawler</title>
   <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
   <style>
     :root {
       --bg:      #0f1117;
@@ -207,6 +208,20 @@
       margin-left: auto;
     }
     .close-btn:hover { color: var(--text); border-color: var(--dim); }
+
+    /* ── Staleness chart ── */
+    .chart-wrap {
+      margin-top: 0.75rem;
+      border-top: 1px solid var(--border2);
+      padding-top: 0.5rem;
+    }
+    .chart-label {
+      font-size: 0.68rem;
+      color: var(--dim);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 0.3rem;
+    }
   </style>
 </head>
 <body>
@@ -236,6 +251,12 @@
             <tr><td colspan="3" class="hint">loading…</td></tr>
           </tbody>
         </table>
+      </div>
+      <div class="chart-wrap">
+        <p class="chart-label">file age (last access)</p>
+        <div>
+        <canvas id="staleness-chart" height="325"></canvas>
+        </div>
       </div>
     </div>
 
@@ -560,6 +581,57 @@
         return;
       }
     });
+
+    // ── Staleness chart ──────────────────────────────────────────────────────
+    function buildChart(canvasId, points) {
+      const canvas = document.getElementById(canvasId);
+      if (!canvas) return;
+      const existing = Chart.getChart(canvas);
+      if (existing) existing.destroy();
+      new Chart(canvas, {
+        type: 'bar',
+        data: {
+          labels: points.map(p => p.label),
+          datasets: [{
+              data: points.map(p => p.total_bytes/1_073_741_824),
+              backgroundColor: 'rgba(88,166,255,0.35)',
+              borderColor:     'rgba(88,166,255,0.7)',
+              borderWidth: 1,
+              borderRadius: 2,
+          }],
+        },
+          options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label: ctx => {
+                  const p = points[ctx.dataIndex];
+                  const gb = (p.total_bytes / 1_073_741_824).toFixed(1);
+                  return `${ctx.parsed.y.toLocaleString()} files · ${gb} GB`;
+                },
+              },
+            },
+          },
+            scales: {
+            x: {
+              ticks: { color: '#6b7685', font: { family: 'monospace', size: 10 }, maxRotation: 45 },
+              grid:  { color: 'rgba(48,54,61,0.5)' },
+            },
+            y: {
+              ticks: { color: '#6b7685', font: { family: 'monospace', size: 10 } },
+              grid:  { color: 'rgba(48,54,61,0.5)' },
+            },
+          },
+        },
+      });
+    }
+
+    fetch('/api/staleness')
+      .then(r => r.json())
+      .then(data => buildChart('staleness-chart', data));
 
     // ── Init ─────────────────────────────────────────────────────────────────
     attachSort('fs-table',             'fs-tbody',             'bytes', false);

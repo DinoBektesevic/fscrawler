@@ -1,6 +1,7 @@
 use axum::{
     extract::{Path, State},
     response::Html,
+    Json,
 };
 use sqlx::PgPool;
 use chrono_tz::America::Los_Angeles;
@@ -207,4 +208,31 @@ pub async fn user_tree(
 
 pub async fn mydisk_page(Path(_uid): Path<i64>) -> Html<&'static str> {
     Html(include_str!("../static/mydisk.html"))
+}
+
+pub async fn staleness(State(pool): State<PgPool>) -> Json<Vec<db::StalenessPoint>> {
+    match db::get_staleness(&pool).await {
+        Ok(v)  => Json(v),
+        Err(_) => Json(vec![]),
+    }
+}
+
+pub async fn user_staleness(
+    State(pool): State<PgPool>,
+    Path(uid): Path<i64>,
+) -> Json<Vec<db::StalenessPoint>> {
+    match db::get_user_staleness(&pool, uid).await {
+        Ok(v)  => Json(v),
+        Err(_) => Json(vec![]),
+    }
+}
+
+pub async fn user_summary(
+    State(pool): State<PgPool>,
+    Path(uid): Path<i64>,
+) -> Json<Option<db::UserSummaryRow>> {
+    match db::get_user_summary(&pool, uid).await {
+        Ok(v)  => Json(v),
+        Err(_) => Json(None),
+    }
 }

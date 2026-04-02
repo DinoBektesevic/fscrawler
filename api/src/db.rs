@@ -1,4 +1,5 @@
 use sqlx::{FromRow, PgPool};
+use chrono::Datelike;
 
 #[derive(FromRow)]
 pub struct FilesystemRow {
@@ -149,6 +150,95 @@ pub async fn get_user_dir_children(
     .bind(dir_id)
     .bind(uid)
     .fetch_all(pool)
+    .await
+}
+
+// ── Staleness / summary ──────────────────────────────────────────────────────
+
+#[derive(FromRow)]
+struct StalenessRaw {
+    bucket:      Option<chrono::DateTime<chrono::Utc>>,
+    file_count:  i64,
+    total_bytes: i64,
+}
+
+#[derive(serde::Serialize)]
+pub struct StalenessPoint {
+    pub label:       String,
+    pub file_count:  i64,
+    pub total_bytes: i64,
+}
+
+#[derive(serde::Serialize, FromRow)]
+pub struct UserSummaryRow {
+    pub display_name: String,
+    pub total_bytes:  i64,
+    pub file_count:   i64,
+}
+
+fn bucket_label(dt: &chrono::DateTime<chrono::Utc>) -> String {
+    let q = (dt.month0() / 3) + 1;
+    format!("{} Q{}", dt.year(), q)
+}
+
+pub async fn get_staleness(pool: &PgPool) -> Result<Vec<StalenessPoint>, sqlx::Error> {
+    let rows = sqlx::query_as::<_, StalenessRaw>(
+        "SELECT date_trunc('quarter', atime) AS bucket,
+                COUNT(*)                     AS file_count,
+                COALESCE(SUM(size_bytes), 0)::bigint AS total_bytes
+         FROM files
+         WHERE atime IS NOT NULL
+           AND atime > '2000-01-01'
+           AND atime <= NOW() + INTERVAL '1 day'
+         GROUP BY bucket
+         ORDER BY bucket",
+    )
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows.iter().map(|r| StalenessPoint {
+        label:       r.bucket.as_ref().map(bucket_label).unwrap_or_default(),
+        file_count:  r.file_count,
+        total_bytes: r.total_bytes,
+    }).collect())
+}
+
+pub async fn get_user_staleness(pool: &PgPool, uid: i64) -> Result<Vec<StalenessPoint>, sqlx::Error> {
+    let rows = sqlx::query_as::<_, StalenessRaw>(
+        "SELECT date_trunc('quarter', f.atime) AS bucket,
+                COUNT(*)                       AS file_count,
+                COALESCE(SUM(f.size_bytes), 0)::bigint AS total_bytes
+         FROM files f
+         WHERE f.owner_uid = $1
+           AND f.atime IS NOT NULL
+           AND f.atime > '2000-01-01'
+           AND f.atime <= NOW() + INTERVAL '1 day'
+         GROUP BY bucket
+         ORDER BY bucket",
+    )
+    .bind(uid)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows.iter().map(|r| StalenessPoint {
+        label:       r.bucket.as_ref().map(bucket_label).unwrap_or_default(),
+        file_count:  r.file_count,
+        total_bytes: r.total_bytes,
+    }).collect())
+}
+
+pub async fn get_user_summary(pool: &PgPool, uid: i64) -> Result<Option<UserSummaryRow>, sqlx::Error> {
+    sqlx::query_as::<_, UserSummaryRow>(
+        "SELECT COALESCE(u.username, u.uid::text) AS display_name,
+                COALESCE(SUM(us.total_bytes), 0)::bigint AS total_bytes,
+                COALESCE(SUM(us.file_count),  0)::bigint AS file_count
+         FROM users u
+         LEFT JOIN user_stats us ON us.uid = u.uid
+         WHERE u.uid = $1
+         GROUP BY u.uid, u.username",
+    )
+    .bind(uid)
+    .fetch_optional(pool)
     .await
 }
 

@@ -73,6 +73,9 @@ async fn main() {
         .route("/api/users/{uid}/dirs/{dir_id}",   get(routes::user_dir_children))
         .route("/api/users/{uid}/tree",            get(routes::user_tree))
         .route("/api/dirs/{dir_id}",               get(routes::dir_children))
+        .route("/api/staleness",                   get(routes::staleness))
+        .route("/api/users/{uid}/staleness",       get(routes::user_staleness))
+        .route("/api/users/{uid}/summary",         get(routes::user_summary))
         .route("/mydisk/{uid}",                    get(routes::mydisk_page))
         .fallback_service(ServeDir::new(&static_dir))
         .with_state(pool);
