@@ -127,13 +127,14 @@ pub async fn dir_children(
     let html = rows.iter().map(|row| {
         let name = row.path.split('/').next_back().unwrap_or(&row.path);
         format!(
-            r#"<tr class="clickable" data-dir-id="{dir_id}" data-bytes="{bytes}" data-files="{files}" data-name="{name}">
+            r#"<tr class="clickable" data-dir-id="{dir_id}" data-bytes="{bytes}" data-files="{files}" data-name="{name}" data-path="{path}">
                  <td>{name}</td>
                  <td class="num"><span class="num-val">{size}</span><span class="bar-wrap"><span class="bar"></span></span></td>
                  <td class="num">{files}</td>
                </tr>"#,
             dir_id = row.dir_id,
             name   = name,
+            path   = row.path,
             bytes  = row.subtree_bytes,
             size   = fmt_bytes(row.subtree_bytes),
             files  = row.subtree_count,
@@ -155,7 +156,7 @@ pub async fn user_dir_children(
     let html = rows.iter().map(|row| {
         let name = row.path.split('/').next_back().unwrap_or(&row.path);
         format!(
-            r#"<tr class="clickable" data-dir-id="{dir_id}" data-bytes="{bytes}" data-files="{files}" data-name="{name}">
+            r#"<tr class="clickable" data-dir-id="{dir_id}" data-bytes="{bytes}" data-files="{files}" data-name="{name}" data-path="{path}">
                  <td>{name}</td>
                  <td class="num"><span class="num-val">{size}</span><span class="bar-wrap"><span class="bar"></span></span></td>
                  <td class="num">{files}</td>
@@ -163,6 +164,7 @@ pub async fn user_dir_children(
                </tr>"#,
             dir_id = row.dir_id,
             name   = name,
+            path   = row.path,
             bytes  = row.user_bytes,
             size   = fmt_bytes(row.user_bytes),
             files  = row.user_files,
@@ -183,8 +185,9 @@ pub async fn user_tree(
     };
 
     let html = rows.iter().map(|row| {
+        let mtime = fmt_mtime(&row.last_mtime);
         format!(
-            r#"<tr class="clickable" data-dir-id="{dir_id}" data-bytes="{bytes}" data-files="{files}" data-name="{path}">
+            r#"<tr class="clickable" data-dir-id="{dir_id}" data-bytes="{bytes}" data-files="{files}" data-name="{path}" data-mtime="{mtime}">
                  <td class="cell-path">{path}</td>
                  <td class="num"><span class="num-val">{size}</span><span class="bar-wrap"><span class="bar"></span></span></td>
                  <td class="num">{files}</td>
@@ -195,7 +198,7 @@ pub async fn user_tree(
             bytes  = row.user_bytes,
             size   = fmt_bytes(row.user_bytes),
             files  = row.user_files,
-            mtime  = fmt_mtime(&row.last_mtime),
+            mtime  = mtime,
         )
     }).collect();
 

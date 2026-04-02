@@ -6,137 +6,567 @@
   <title>fscrawler</title>
   <script src="https://unpkg.com/htmx.org@2.0.4"></script>
   <style>
+    :root {
+      --bg:      #0f1117;
+      --surface: #161b22;
+      --border:  #30363d;
+      --border2: #21262d;
+      --text:    #c9d1d9;
+      --dim:     #6b7685;
+      --accent:  #58a6ff;
+      --num:     #79c0ff;
+      --bar-bg:  rgba(88, 166, 255, 0.1);
+      --hover:   #1f2937;
+      --error:   #f85149;
+    }
+
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
       font-family: ui-monospace, "Cascadia Code", "Source Code Pro", monospace;
-      font-size: 14px;
-      background: #0f1117;
-      color: #c9d1d9;
-      padding: 1.5rem;
+      font-size: 13px;
+      background: var(--bg);
+      color: var(--text);
+      padding: 1.25rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
     }
 
-    h1 { font-size: 1.2rem; color: #58a6ff; margin-bottom: 1.5rem; }
-    h2 { font-size: 0.95rem; color: #8b949e; text-transform: uppercase;
-         letter-spacing: 0.08em; margin-bottom: 0.75rem; }
+    /* ── Header ── */
+    header h1  { font-size: 1.1rem; color: var(--accent); }
+    .subtitle  { color: var(--dim); font-weight: normal; }
 
-    .grid {
+    /* ── Section headings ── */
+    h2 {
+      font-size: 0.72rem;
+      color: var(--dim);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin-bottom: 0.75rem;
+    }
+
+    /* ── Grid layout ── */
+    .explorer-grid {
       display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 1.5rem;
-      margin-bottom: 1.5rem;
+      grid-template-columns: 380px 1fr;
+      gap: 1.25rem;
+      align-items: start;
     }
 
+    /* ── Panels ── */
     .panel {
-      background: #161b22;
-      border: 1px solid #30363d;
+      background: var(--surface);
+      border: 1px solid var(--border);
       border-radius: 6px;
       padding: 1rem;
     }
 
-    table {
-      width: 100%;
-      border-collapse: collapse;
+    .panel-header {
+      display: flex;
+      align-items: baseline;
+      gap: 0.75rem;
+      margin-bottom: 0.75rem;
+      flex-wrap: wrap;
+    }
+    .panel-header h2 { margin-bottom: 0; }
+
+    /* ── Scrollable content ── */
+    .scroll-body {
+      max-height: 45vh;
+      overflow-y: auto;
+      scrollbar-width: thin;
+      scrollbar-color: var(--border) transparent;
     }
 
+    /* Users panel: shorter — just enough to hint at the list */
+    .scroll-body.users-scroll {
+      max-height: 320px;
+    }
+
+    /* ── Tables ── */
+    table { width: 100%; border-collapse: collapse; }
+
     th {
-      color: #8b949e;
+      color: var(--dim);
       font-weight: normal;
       text-align: left;
       padding: 0.3rem 0.5rem;
-      border-bottom: 1px solid #30363d;
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+      user-select: none;
+      position: sticky;
+      top: 0;
+      background: var(--surface);
+      z-index: 1;
     }
+    th[data-col] { cursor: pointer; }
+    th[data-col]:hover { color: var(--text); }
+    th.sort-desc::after { content: ' ↓'; color: var(--accent); }
+    th.sort-asc::after  { content: ' ↑'; color: var(--accent); }
 
     td {
       padding: 0.3rem 0.5rem;
-      border-bottom: 1px solid #21262d;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      max-width: 300px;
+      border-bottom: 1px solid var(--border2);
+      vertical-align: middle;
     }
-
-    td.num { text-align: right; color: #79c0ff; }
+    td.num   { text-align: right; color: var(--num); white-space: nowrap; }
+    td.dim   { color: var(--dim); white-space: nowrap; }
+    td.error { color: var(--error); }
+    td.hint  { color: var(--dim); font-style: italic; }
 
     tr.clickable { cursor: pointer; }
-    tr.clickable:hover td { background: #1f2937; }
+    tr.clickable:hover td { background: var(--hover); }
+    tr.selected   td      { background: rgba(255, 120, 50, 0.12); }
 
-    .htmx-indicator { opacity: 0.4; }
+    /* ── Size bars: only show in default state (not hover, not selected) ── */
+    .bar-wrap { display: none; }
 
-    #user-detail, #dir-view {
-      background: #161b22;
-      border: 1px solid #30363d;
-      border-radius: 6px;
-      padding: 1rem;
-      min-height: 3rem;
+    tr[data-bytes]:not(:hover):not(.selected) td:first-child {
+      background: linear-gradient(
+        to right,
+        var(--bar-bg) var(--bar-w, 0%),
+        transparent   var(--bar-w, 0%)
+      );
     }
 
-    #user-detail table, #dir-view table { width: 100%; }
+    /* ── Copy-path button ── */
+    .copy-btn {
+      position: absolute;
+      right: 0.25rem;
+      top: 50%;
+      transform: translateY(-50%);
+      opacity: 0;
+      transition: opacity 0.15s;
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: var(--dim);
+      font-size: 0.8rem;
+      padding: 0.1rem 0.2rem;
+      line-height: 1;
+    }
+    tr:hover .copy-btn          { opacity: 1; }
+    .copy-btn:hover             { color: var(--accent); }
+    .copy-btn.copied            { color: #3fb950; opacity: 1; }
 
-    .detail-row {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 1.5rem;
+    /* ── Left-truncated paths ── */
+    .cell-path {
+      max-width: 400px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      direction: rtl;
+      text-align: left;
     }
 
-    .detail-label {
-      color: #8b949e;
-      font-size: 0.85rem;
+    /* ── Breadcrumb ── */
+    .breadcrumb {
+      display: flex;
+      align-items: center;
+      gap: 0.2rem;
+      font-size: 0.8rem;
+      flex-wrap: wrap;
+    }
+    .bc-up, .bc-seg {
+      background: none;
+      border: none;
+      color: var(--accent);
+      cursor: pointer;
+      font: inherit;
+      font-size: 0.8rem;
+      padding: 0 0.1rem;
+    }
+    .bc-up:hover, .bc-seg:hover { text-decoration: underline; }
+    .bc-sep { color: var(--border); }
+    .bc-cur { color: var(--text); }
+
+    /* ── User detail section ── */
+    #user-detail-section {
+      opacity: 0;
+      transition: opacity 0.25s ease;
+    }
+
+    .section-bar {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
       margin-bottom: 0.5rem;
     }
+    .section-bar h2 { margin-bottom: 0; }
 
-    .error { color: #f85149; }
+    .close-btn {
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--dim);
+      cursor: pointer;
+      font: inherit;
+      font-size: 0.72rem;
+      padding: 0.1rem 0.4rem;
+      margin-left: auto;
+    }
+    .close-btn:hover { color: var(--text); border-color: var(--dim); }
   </style>
 </head>
 <body>
-  <h1>fscrawler</h1>
 
-  <div class="grid">
-    <!-- Filesystems panel -->
+  <header>
+    <h1>fscrawler <span class="subtitle">// filesystem index</span></h1>
+  </header>
+
+  <!-- ── Section 1: Filesystems + Directory Browser ── -->
+  <div class="explorer-grid">
+
     <div class="panel">
       <h2>Filesystems</h2>
-      <table>
-        <thead>
-          <tr>
-            <th>Path</th>
-            <th style="text-align:right">Size</th>
-            <th style="text-align:right">Files</th>
-          </tr>
-        </thead>
-        <tbody hx-get="/api/filesystems" hx-trigger="load" hx-swap="innerHTML">
-          <tr><td colspan="3" class="htmx-indicator">Loading…</td></tr>
-        </tbody>
-      </table>
+      <div class="scroll-body">
+        <table id="fs-table">
+          <thead>
+            <tr>
+              <th data-col="name">Path</th>
+              <th data-col="bytes">Size</th>
+              <th data-col="files">Files</th>
+            </tr>
+          </thead>
+          <tbody id="fs-tbody"
+                 hx-get="/api/filesystems"
+                 hx-trigger="load"
+                 hx-swap="innerHTML">
+            <tr><td colspan="3" class="hint">loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
     </div>
 
-    <!-- Users panel -->
     <div class="panel">
-      <h2>Users</h2>
-      <table>
+      <div class="panel-header">
+        <h2>Directory Browser</h2>
+        <nav id="dir-breadcrumb" class="breadcrumb"></nav>
+      </div>
+      <div class="scroll-body">
+        <table id="dir-table">
+          <thead>
+            <tr>
+              <th data-col="name">Name</th>
+              <th data-col="bytes">Size</th>
+              <th data-col="files">Files</th>
+            </tr>
+          </thead>
+          <tbody id="dir-tbody">
+            <tr><td colspan="3" class="hint">← click a filesystem to browse</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ── Section 2: Users ── -->
+  <div class="panel">
+    <h2>Users</h2>
+    <div class="scroll-body users-scroll">
+      <table id="users-table">
         <thead>
           <tr>
-            <th>User</th>
-            <th style="text-align:right">Total size</th>
-            <th style="text-align:right">Files</th>
+            <th data-col="name">User</th>
+            <th data-col="bytes">Total size</th>
+            <th data-col="files">Files</th>
           </tr>
         </thead>
-        <tbody hx-get="/api/users" hx-trigger="load" hx-swap="innerHTML">
-          <tr><td colspan="3" class="htmx-indicator">Loading…</td></tr>
+        <tbody id="users-tbody"
+               hx-get="/api/users"
+               hx-trigger="load"
+               hx-swap="innerHTML">
+          <tr><td colspan="3" class="hint">loading…</td></tr>
         </tbody>
       </table>
     </div>
   </div>
 
-  <!-- Detail row — populated on click -->
-  <div class="detail-row">
-    <div>
-      <p class="detail-label">User breakdown by filesystem</p>
-      <div id="user-detail"></div>
+  <!-- ── Section 3: User detail (hidden until a user is clicked) ── -->
+  <div class="explorer-grid" id="user-detail-section" style="display:none">
+
+    <div class="panel">
+      <div class="section-bar">
+        <h2 id="user-detail-heading">By filesystem</h2>
+        <button class="close-btn" onclick="closeUserDetail()">× close</button>
+      </div>
+      <table id="user-breakdown-table">
+        <thead>
+          <tr>
+            <th data-col="name">Filesystem</th>
+            <th data-col="bytes">Size</th>
+            <th data-col="files">Files</th>
+          </tr>
+        </thead>
+        <tbody id="user-breakdown-tbody"></tbody>
+      </table>
     </div>
-    <div>
-      <p class="detail-label">Directory browser</p>
-      <div id="dir-view"></div>
+
+    <div class="panel">
+      <div class="panel-header">
+        <h2>User directories</h2>
+        <nav id="user-dir-breadcrumb" class="breadcrumb"></nav>
+      </div>
+      <div class="scroll-body">
+        <table id="user-dir-table">
+          <thead>
+            <tr>
+              <th data-col="name">Path</th>
+              <th data-col="bytes">Size</th>
+              <th data-col="files">Files</th>
+              <th data-col="mtime">Modified</th>
+            </tr>
+          </thead>
+          <tbody id="user-dir-tbody" data-uid=""></tbody>
+        </table>
+      </div>
     </div>
+
   </div>
+
+  <script>
+    // ── State ────────────────────────────────────────────────────────────────
+    const sortState = {};
+    const stacks    = { main: [], user: [] };
+    let   selectedUid = null;
+
+    // ── Sorting ──────────────────────────────────────────────────────────────
+    function getSortVal(row, col) {
+      if (col === 'bytes') return Number(row.dataset.bytes || 0);
+      if (col === 'files') return Number(row.dataset.files || 0);
+      if (col === 'mtime') return row.dataset.mtime || '';
+      return (row.dataset.name || '').toLowerCase();
+    }
+
+    function sortTbody(tbodyId, col, asc) {
+      const tbody = document.getElementById(tbodyId);
+      if (!tbody) return;
+      const rows = [...tbody.querySelectorAll('tr[data-bytes]')];
+      rows.sort((a, b) => {
+        const av = getSortVal(a, col), bv = getSortVal(b, col);
+        const cmp = typeof av === 'number' ? av - bv : av.localeCompare(bv);
+        return asc ? cmp : -cmp;
+      });
+      rows.forEach(r => tbody.appendChild(r));
+    }
+
+    function setActiveSort(tableId, col, asc) {
+      const table = document.getElementById(tableId);
+      if (!table) return;
+      table.querySelectorAll('th[data-col]').forEach(th => {
+        th.classList.remove('sort-asc', 'sort-desc');
+        if (th.dataset.col === col) th.classList.add(asc ? 'sort-asc' : 'sort-desc');
+      });
+      const tbody = table.querySelector('tbody');
+      if (tbody) sortState[tbody.id] = { col, asc };
+    }
+
+    function attachSort(tableId, tbodyId, defaultCol, defaultAsc) {
+      const table = document.getElementById(tableId);
+      if (!table) return;
+      sortState[tbodyId] = { col: defaultCol, asc: defaultAsc };
+      setActiveSort(tableId, defaultCol, defaultAsc);
+      table.querySelectorAll('thead th[data-col]').forEach(th => {
+        th.addEventListener('click', () => {
+          const st  = sortState[tbodyId];
+          const col = th.dataset.col;
+          const asc = col === st.col ? !st.asc : (col === 'name' || col === 'mtime');
+          sortState[tbodyId] = { col, asc };
+          sortTbody(tbodyId, col, asc);
+          setActiveSort(tableId, col, asc);
+        });
+      });
+    }
+
+    // ── Size bars (background gradient on first column) ───────────────────────
+    function updateBars(tbodyId) {
+      const tbody = document.getElementById(tbodyId);
+      if (!tbody) return;
+      const rows = [...tbody.querySelectorAll('tr[data-bytes]')];
+      const max  = Math.max(0, ...rows.map(r => Number(r.dataset.bytes)));
+      rows.forEach(r => {
+        const pct = max ? (Number(r.dataset.bytes) / max * 100).toFixed(1) + '%' : '0%';
+        r.style.setProperty('--bar-w', pct);
+      });
+    }
+
+    // ── Copy-path buttons ────────────────────────────────────────────────────
+    function addCopyButtons(tbodyId) {
+      const tbody = document.getElementById(tbodyId);
+      if (!tbody) return;
+      tbody.querySelectorAll('tr[data-path]').forEach(row => {
+        if (row.querySelector('.copy-btn')) return;
+        const td = row.querySelector('td');
+        if (!td) return;
+        td.style.position = 'relative';
+        const btn = document.createElement('button');
+        btn.className = 'copy-btn';
+        btn.title     = 'Copy path';
+        btn.textContent = '⎘';
+        btn.addEventListener('click', e => {
+          e.stopPropagation();
+          navigator.clipboard.writeText(row.dataset.path).then(() => {
+            btn.textContent = '✓';
+            btn.classList.add('copied');
+            setTimeout(() => {
+              btn.textContent = '⎘';
+              btn.classList.remove('copied');
+            }, 1500);
+          });
+        });
+        td.appendChild(btn);
+      });
+    }
+
+    // ── After htmx settles: update bars, re-apply sort, show empty state ────
+    document.addEventListener('htmx:afterSettle', e => {
+      const id = e.detail.target?.id;
+      if (!id) return;
+      updateBars(id);
+      const st = sortState[id];
+      if (st) sortTbody(id, st.col, st.asc);
+      // Copy buttons for dir browsers
+      if (id === 'dir-tbody' || id === 'user-dir-tbody') addCopyButtons(id);
+      // Empty state
+      if (id === 'dir-tbody' || id === 'user-dir-tbody') {
+        const tbody = document.getElementById(id);
+        const cols  = id === 'user-dir-tbody' ? 4 : 3;
+        if (tbody && tbody.querySelectorAll('tr[data-bytes]').length === 0) {
+          tbody.innerHTML = `<tr><td colspan="${cols}" class="hint">no subdirectories</td></tr>`;
+        }
+      }
+    });
+
+    // ── Breadcrumb ───────────────────────────────────────────────────────────
+    function renderBreadcrumb(ctx) {
+      const bcId = ctx === 'user' ? 'user-dir-breadcrumb' : 'dir-breadcrumb';
+      const bc   = document.getElementById(bcId);
+      if (!bc) return;
+      const stack = stacks[ctx];
+      let html = '';
+      if (stack.length > 1) html += `<button class="bc-up" onclick="goUp('${ctx}')">↑</button>`;
+      stack.forEach((seg, i) => {
+        if (i > 0) html += '<span class="bc-sep">/</span>';
+        if (i < stack.length - 1) {
+          html += `<button class="bc-seg" onclick="jumpTo('${ctx}',${i})">${seg.name}</button>`;
+        } else {
+          html += `<span class="bc-cur">${seg.name}</span>`;
+        }
+      });
+      bc.innerHTML = html;
+    }
+
+    function userDirUrl(uid, id) {
+      return id === 'tree'
+        ? `/api/users/${uid}/tree`
+        : `/api/users/${uid}/dirs/${id}`;
+    }
+
+    function navDir(ctx, id, name, uid) {
+      stacks[ctx].push({ id, name });
+      renderBreadcrumb(ctx);
+      const tbodyId = ctx === 'user' ? 'user-dir-tbody' : 'dir-tbody';
+      const tableId = ctx === 'user' ? 'user-dir-table' : 'dir-table';
+      const url     = (ctx === 'user' && uid) ? userDirUrl(uid, id) : `/api/dirs/${id}`;
+      htmx.ajax('GET', url, { target: '#' + tbodyId, swap: 'innerHTML' });
+      setActiveSort(tableId, 'bytes', false);
+    }
+
+    function jumpTo(ctx, idx) {
+      stacks[ctx] = stacks[ctx].slice(0, idx + 1);
+      renderBreadcrumb(ctx);
+      const { id }  = stacks[ctx][stacks[ctx].length - 1];
+      const tbodyId = ctx === 'user' ? 'user-dir-tbody' : 'dir-tbody';
+      const tableId = ctx === 'user' ? 'user-dir-table' : 'dir-table';
+      const uid     = ctx === 'user'
+        ? document.getElementById('user-dir-tbody').dataset.uid
+        : null;
+      const url = uid ? userDirUrl(uid, id) : `/api/dirs/${id}`;
+      htmx.ajax('GET', url, { target: '#' + tbodyId, swap: 'innerHTML' });
+      setActiveSort(tableId, 'bytes', false);
+    }
+
+    function goUp(ctx) {
+      if (stacks[ctx].length > 1) jumpTo(ctx, stacks[ctx].length - 2);
+    }
+
+    // ── User detail ──────────────────────────────────────────────────────────
+    function closeUserDetail() {
+      const section = document.getElementById('user-detail-section');
+      section.style.opacity = '0';
+      setTimeout(() => { section.style.display = 'none'; }, 250);
+      document.querySelectorAll('#users-tbody tr.selected').forEach(r => r.classList.remove('selected'));
+      selectedUid = null;
+    }
+
+    function loadUserDetail(uid, name, rowEl) {
+      selectedUid = uid;
+      document.querySelectorAll('#users-tbody tr.selected').forEach(r => r.classList.remove('selected'));
+      rowEl.classList.add('selected');
+      document.getElementById('user-dir-tbody').dataset.uid = uid;
+      document.getElementById('user-detail-heading').textContent = name + ' — by filesystem';
+      stacks.user = [{ id: 'tree', name: 'recent dirs' }];
+      renderBreadcrumb('user');
+      setActiveSort('user-dir-table', 'bytes', false);
+      htmx.ajax('GET', `/api/users/${uid}/detail`, { target: '#user-breakdown-tbody', swap: 'innerHTML' });
+      htmx.ajax('GET', `/api/users/${uid}/tree`,   { target: '#user-dir-tbody',       swap: 'innerHTML' });
+      const section = document.getElementById('user-detail-section');
+      section.style.display = 'grid';
+      requestAnimationFrame(() => requestAnimationFrame(() => { section.style.opacity = '1'; }));
+    }
+
+    // ── Click delegation ─────────────────────────────────────────────────────
+    document.addEventListener('click', e => {
+      const fsRow = e.target.closest('#fs-tbody tr[data-dir-id]');
+      if (fsRow) {
+        stacks.main = [];
+        const name = fsRow.dataset.name.split('/').filter(Boolean).pop() || fsRow.dataset.name;
+        navDir('main', fsRow.dataset.dirId, name, null);
+        return;
+      }
+
+      const dirRow = e.target.closest('#dir-tbody tr[data-dir-id]');
+      if (dirRow) {
+        navDir('main', dirRow.dataset.dirId, dirRow.dataset.name, null);
+        return;
+      }
+
+      const userRow = e.target.closest('#users-tbody tr[data-uid]');
+      if (userRow) {
+        const uid = userRow.dataset.uid;
+        if (uid === selectedUid) {
+          closeUserDetail();
+        } else {
+          loadUserDetail(uid, userRow.dataset.name, userRow);
+        }
+        return;
+      }
+
+      const bkRow = e.target.closest('#user-breakdown-tbody tr[data-dir-id]');
+      if (bkRow) {
+        const uid  = document.getElementById('user-dir-tbody').dataset.uid;
+        stacks.user = [];
+        const name = bkRow.dataset.name.split('/').filter(Boolean).pop() || bkRow.dataset.name;
+        navDir('user', bkRow.dataset.dirId, name, uid);
+        return;
+      }
+
+      const udRow = e.target.closest('#user-dir-tbody tr[data-dir-id]');
+      if (udRow) {
+        const uid = document.getElementById('user-dir-tbody').dataset.uid;
+        navDir('user', udRow.dataset.dirId, udRow.dataset.name, uid);
+        return;
+      }
+    });
+
+    // ── Init ─────────────────────────────────────────────────────────────────
+    attachSort('fs-table',             'fs-tbody',             'bytes', false);
+    attachSort('dir-table',            'dir-tbody',            'bytes', false);
+    attachSort('users-table',          'users-tbody',          'bytes', false);
+    attachSort('user-breakdown-table', 'user-breakdown-tbody', 'bytes', false);
+    attachSort('user-dir-table',       'user-dir-tbody',       'bytes', false);
+  </script>
 </body>
 </html>

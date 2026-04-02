@@ -341,7 +341,7 @@ pub async fn clear_tables(pool: &PgPool) -> Result<(), WriterError> {
             .await
             .map_err(|e| WriterError::Database(e.to_string()))?;
     }
-    sqlx::query("TRUNCATE files, directory_closure, directories, users, directory_stats")
+    sqlx::query("TRUNCATE files, directory_closure, directories, users, directory_stats, user_stats")
         .execute(pool)
         .await
         .map_err(|e| WriterError::Database(e.to_string()))?;
@@ -381,23 +381,6 @@ pub async fn post_crawl(pool: &PgPool) -> Result<(), WriterError> {
          FROM directories
          WHERE owner_uid IS NOT NULL
          ON CONFLICT (uid) DO NOTHING"
-    )
-        .execute(pool)
-        .await
-        .map_err(|e| WriterError::Database(e.to_string()))?;
-
-    // 2. populate user_stats, a per-directory breakdown per user
-    sqlx::query(
-        "INSERT INTO user_stats (uid, dir_id, total_bytes, file_count)
-         SELECT f.owner_uid, dc.ancestor_id, SUM(f.size_bytes), COUNT(*)
-         FROM files f
-         JOIN directory_closure dc ON dc.descendant_id = f.dir_id
-         JOIN directories d        ON d.dir_id = dc.ancestor_id AND d.parent_id IS NULL
-         GROUP BY f.owner_uid, dc.ancestor_id
-         ON CONFLICT (uid, dir_id) DO UPDATE
-        SET
-            total_bytes = EXCLUDED.total_bytes,
-            file_count  = EXCLUDED.file_count;"
     )
         .execute(pool)
         .await
@@ -519,6 +502,22 @@ pub async fn finish(pool: &PgPool) -> Result<(), WriterError> {
             JOIN files f ON f.dir_id = dc.descendant_id
             GROUP BY dc.ancestor_id
         ) subtree ON subtree.dir_id = d.dir_id"
+    )
+        .execute(pool)
+        .await
+        .map_err(|e| WriterError::Database(e.to_string()))?;
+
+    // directory_closure is now populated — compute per-user per-filesystem totals
+    sqlx::query(
+        "INSERT INTO user_stats (uid, dir_id, total_bytes, file_count)
+         SELECT f.owner_uid, dc.ancestor_id, SUM(f.size_bytes), COUNT(*)
+         FROM files f
+         JOIN directory_closure dc ON dc.descendant_id = f.dir_id
+         JOIN directories d        ON d.dir_id = dc.ancestor_id AND d.parent_id IS NULL
+         GROUP BY f.owner_uid, dc.ancestor_id
+         ON CONFLICT (uid, dir_id) DO UPDATE
+             SET total_bytes = EXCLUDED.total_bytes,
+                 file_count  = EXCLUDED.file_count"
     )
         .execute(pool)
         .await

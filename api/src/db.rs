@@ -155,7 +155,7 @@ pub async fn get_user_dir_children(
 pub async fn get_user_tree(
     pool: &PgPool,
     uid: i64) -> Result<Vec<UserTreeRow>, sqlx::Error>{
-    sqlx::query_as::<_, UserDirChildRow>(
+    sqlx::query_as::<_, UserTreeRow>(
         "SELECT d.dir_id, d.path,
          COALESCE(SUM(f.size_bytes), 0)::bigint AS user_bytes,
          COUNT(f.file_id)::bigint               AS user_files,
